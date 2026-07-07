@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "posttrain-lab"
+version = "0.1.0"
+description = "SFT vs DPO vs PPO/GRPO: reward-vs-KL frontier experiments for LLM preference alignment"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "transformers",
+    "trl>=1.7.0",
+    "datasets",
+    "accelerate",
+    "peft",
+    "omegaconf",
+    "wandb",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+]
+
+[project.optional-dependencies]
+# GPU node extras — install on the training machine, not needed for data prep / analysis.
+gpu = [
+    "deepspeed",
+    "vllm",        # must stay within TRL's supported range (see requirements.txt pin)
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

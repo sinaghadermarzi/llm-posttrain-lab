@@ -1,0 +1,39 @@
+# Global override applied on top of any stage config (SMOKE=1 / make smoke).
+# Exercises every stage interface end-to-end on a tiny model + tiny slices.
+# Target: full 6-stage pipeline in < 30 min on a single GPU.
+smoke: true
+results_root: results/smoke
+
+model:
+  base: Qwen/Qwen2.5-0.5B
+  attn_implementation: sdpa      # no flash-attn requirement for smoke
+
+data:
+  max_samples: 100
+
+train:
+  max_length: 512
+  max_steps: 10
+  save_steps: 5
+  save_strategy: steps
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+  report_to: none
+  # online-RL sizes small enough for one GPU
+  total_episodes: 32
+  response_length: 64
+  max_completion_length: 64
+  num_generations: 2   # must divide the smoke generation batch (2 x 1)
+  local_rollout_forward_batch_size: 2
+  use_vllm: false
+
+eval:
+  num_prompts: 16
+  samples_per_prompt: 2
+  max_new_tokens: 64
+  use_vllm: false
+  # score with the smoke RM itself; avoids the 8B judge download
+  judge: ${paths.reward_model}
+
+min_accuracy: 0.0                # smoke RM won't learn anything meaningful

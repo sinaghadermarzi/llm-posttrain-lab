@@ -1,0 +1,27 @@
+# Arm PPO: online RL from pi_SFT with the stage-2 reward model.
+# kl_coef is the explicit KL knob; sweep via sweeps.yaml (CLI: train.kl_coef=0.05).
+# Memory note: policy + ref + reward + value are all resident; keep
+# local_rollout_forward_batch_size small — it is the OOM hotspot.
+stage: ppo
+run_name: ppo-kl${train.kl_coef}
+output_dir: ${results_root}/runs/ppo_kl${train.kl_coef}_seed${seed}
+init_from: ${paths.sft_base}
+reward_model_path: ${paths.reward_model}
+
+data:
+  split: train_gen
+  max_samples: 8000
+  max_prompt_length: 512
+
+train:
+  kl_coef: 0.05
+  learning_rate: 1.0e-6
+  total_episodes: 8000
+  per_device_train_batch_size: 4   # x4 GPUs x accum 4 -> effective 64
+  gradient_accumulation_steps: 4
+  local_rollout_forward_batch_size: 8
+  num_ppo_epochs: 1
+  response_length: 512
+  temperature: 1.0
+  save_strategy: steps
+  save_steps: 0.2                  # 5 checkpoints per run
