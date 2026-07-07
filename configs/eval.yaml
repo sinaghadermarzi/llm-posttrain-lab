@@ -1,17 +1,21 @@
 # Stage 4: per-checkpoint evaluation -> one frontier point each.
+# Task-agnostic knobs only; task-specific eval keys (prompt split, sample
+# count, graders, metric_groups) live in configs/tasks/<task>.yaml.
+# Select the task on the CLI: python -m posttrain_lab.eval.run_eval task=math
 eval:
-  prompts_split: test_prefs
-  num_prompts: 512
-  samples_per_prompt: 4
   # Unbiased Monte-Carlo KL requires sampling from the actual policy distribution:
   temperature: 1.0
   top_p: 1.0
   max_new_tokens: 512
   kl_estimator: k3               # k1 is always logged as cross-check
   logprob_batch_size: 8
-  reference: ${paths.sft_base}   # KL is measured against pi_SFT
-  train_rm: ${paths.reward_model}
-  judge: Skywork/Skywork-Reward-V2-Llama-3.1-8B
-  judge_batch_size: 4
+  reference: ${paths.sft_base}   # KL vs the task's own pi_SFT (root is per-task)
   use_vllm: true                 # HF generate fallback if vllm unavailable
   out_dir: ${results_root}/eval
+  # capability retention (both tracks)
+  retention:
+    max_tokens: 200000           # wikitext-2 test token cap for the PPL pass
+  harness:
+    tasks: [hellaswag, arc_easy, arc_challenge]
+    limit: null                  # docs per task; null = full
+    which: all                   # all | final — user opted for full coverage

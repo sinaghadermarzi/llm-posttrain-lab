@@ -16,6 +16,7 @@ dependencies = [
     "accelerate",
     "peft",
     "omegaconf",
+    "lm-eval",
     "wandb",
     "pandas",
     "matplotlib",

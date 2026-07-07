@@ -1,0 +1,17 @@
+# Task: helpfulness preference alignment on UltraFeedback.
+# Reward = learned preference model; evaluation judge = held-out Skywork RM.
+dataset:
+  id: HuggingFaceH4/ultrafeedback_binarized
+  format: ultrafeedback
+
+eval:
+  prompts_split: test_prefs
+  num_prompts: 512
+  samples_per_prompt: 4
+  train_rm: ${paths.reward_model}
+  judge: Skywork/Skywork-Reward-V2-Llama-3.1-8B
+  judge_batch_size: 4
+  metric_groups: [core, retention_ppl, retention_harness, diversity, pref_logps]
+  pref_logps:
+    split: test_prefs
+    num_pairs: 256

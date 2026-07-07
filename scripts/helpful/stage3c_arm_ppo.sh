@@ -7,6 +7,6 @@ cd "$(dirname "$0")/.."
 while IFS= read -r ov; do
   echo "[ppo] running $ov"
   accelerate launch --config_file configs/accelerate/zero2_4gpu.yaml \
-    --module posttrain_lab.train.ppo configs/arm_ppo.yaml "$ov" "$@"
-done < <(python -m posttrain_lab.config ppo)
+    --module posttrain_lab.train.ppo configs/helpful/arm_ppo.yaml "$ov" "$@"
+done < <(python -m posttrain_lab.config helpful ppo)
 echo "[ppo] all runs finished"

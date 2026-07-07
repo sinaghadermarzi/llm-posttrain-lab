@@ -3,4 +3,4 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 accelerate launch --config_file configs/accelerate/zero2_4gpu.yaml \
-  --module posttrain_lab.train.sft configs/arm_sft.yaml "$@"
+  --module posttrain_lab.train.sft configs/helpful/arm_sft.yaml "$@"

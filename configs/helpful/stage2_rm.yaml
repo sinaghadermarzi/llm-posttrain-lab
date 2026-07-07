@@ -1,5 +1,6 @@
 # Stage 2: train the reward model (scalar head on pi_SFT) on preference pairs.
 # Gate: pairwise accuracy on test_prefs must be >= min_accuracy or the pipeline aborts.
+task: helpful
 stage: rm
 run_name: rm
 output_dir: ${results_root}/runs/rm_seed${seed}

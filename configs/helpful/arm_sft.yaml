@@ -1,6 +1,7 @@
 # Arm SFT: preference alignment by pure imitation — continued SFT on the *chosen*
 # responses of the preference split. No KL knob exists; the frontier curve is
 # traced by checkpoints over training. That absence is the point of the experiment.
+task: helpful
 stage: sft
 run_name: arm-sft
 output_dir: ${results_root}/runs/sft_seed${seed}

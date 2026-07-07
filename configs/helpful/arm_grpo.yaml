@@ -1,6 +1,7 @@
 # Arm GRPO: online RL from pi_SFT with the stage-2 reward model, group-relative
 # advantages (no value model). beta is the KL coefficient; sweep via sweeps.yaml
 # (CLI: train.beta=0.04). beta=0.0 traces the "unconstrained RL" cautionary curve.
+task: helpful
 stage: grpo
 run_name: grpo-beta${train.beta}
 output_dir: ${results_root}/runs/grpo_beta${train.beta}_seed${seed}

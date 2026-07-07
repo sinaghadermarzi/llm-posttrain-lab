@@ -2,6 +2,7 @@
 # kl_coef is the explicit KL knob; sweep via sweeps.yaml (CLI: train.kl_coef=0.05).
 # Memory note: policy + ref + reward + value are all resident; keep
 # local_rollout_forward_batch_size small — it is the OOM hotspot.
+task: helpful
 stage: ppo
 run_name: ppo-kl${train.kl_coef}
 output_dir: ${results_root}/runs/ppo_kl${train.kl_coef}_seed${seed}
