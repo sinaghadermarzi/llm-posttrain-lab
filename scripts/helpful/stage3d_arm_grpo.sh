@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Arm GRPO: sequential 4-GPU runs over the beta grid, vLLM colocated.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 while IFS= read -r ov; do
   echo "[grpo] running $ov"
