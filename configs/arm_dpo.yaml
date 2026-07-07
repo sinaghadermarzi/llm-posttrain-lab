@@ -1,0 +1,24 @@
+# Arm DPO: offline preference optimization from pi_SFT (reference = pi_SFT).
+# beta is the implicit KL knob; sweep values come from sweeps.yaml (CLI override:
+#   python -m posttrain_lab.train.dpo ... train.beta=0.1).
+stage: dpo
+run_name: dpo-beta${train.beta}
+output_dir: ${results_root}/runs/dpo_beta${train.beta}_seed${seed}
+init_from: ${paths.sft_base}
+
+data:
+  split: train_prefs
+  max_samples: 20000
+
+train:
+  beta: 0.1
+  learning_rate: 5.0e-7
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  num_train_epochs: 1
+  max_length: 1536
+  truncation_mode: keep_end
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 16  # 1 GPU per run (sweep runs in parallel) -> effective 64
+  save_strategy: steps
+  save_steps: 0.2                  # 5 checkpoints per run

@@ -1,0 +1,24 @@
+# Pinned stack for the GPU node (4x A100 80GB, CUDA 12.x).
+#
+# Core pins below were resolved and verified together (imports + config
+# construction for every stage) against trl 1.7.0. The trl <-> vllm coupling
+# is the tightest constraint: TRL 1.7 supports vllm 0.13.0-0.23.0. If you bump
+# trl, re-check its supported vllm range and re-run `make smoke`.
+trl==1.7.0
+transformers==5.13.0
+datasets==5.0.0
+accelerate==1.14.0
+peft==0.19.1
+omegaconf==2.3.1
+# torch is deliberately unpinned: vllm ships wheels built against an exact
+# torch version and will pull the matching one. (Verified with torch 2.12.1.)
+torch
+vllm==0.23.0
+deepspeed
+wandb
+pandas
+matplotlib
+seaborn
+# Optional but recommended on A100 (long build; needs nvcc). Without it set
+# model.attn_implementation: sdpa in configs/base.yaml:
+# flash-attn
