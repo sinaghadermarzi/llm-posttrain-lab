@@ -41,23 +41,36 @@ def baseline_stats(eval_root: Path) -> dict[str, tuple[float, float]]:
             for line in f:
                 row = json.loads(line)
                 for key in scores:
-                    scores[key].append(row[key])
+                    if key in row:
+                        scores[key].append(row[key])
     return {
         key: (statistics.mean(vals), statistics.stdev(vals) if len(vals) > 1 else 1.0)
         for key, vals in scores.items()
+        if vals
     }
 
 
 def main() -> None:
     results_root = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
     df = load_rows(results_root / "eval")
-    stats = baseline_stats(results_root / "eval")
 
-    judge_mean, judge_std = stats["score_judge"]
-    rm_mean, rm_std = stats["score_train_rm"]
-    df["reward_judge_z"] = (df["reward_judge"] - judge_mean) / (judge_std or 1.0)
-    df["reward_train_rm_z"] = (df["reward_train_rm"] - rm_mean) / (rm_std or 1.0)
-    df["rm_gap_z"] = df["reward_train_rm_z"] - df["reward_judge_z"]
+    # z-score the learned-reward columns against the pi_SFT baseline where they
+    # exist (helpful track); math rows carry absolute pass@k metrics instead.
+    if "reward_judge" in df.columns:
+        stats = baseline_stats(results_root / "eval")
+        judge_mean, judge_std = stats["score_judge"]
+        rm_mean, rm_std = stats["score_train_rm"]
+        df["reward_judge_z"] = (df["reward_judge"] - judge_mean) / (judge_std or 1.0)
+        df["reward_train_rm_z"] = (df["reward_train_rm"] - rm_mean) / (rm_std or 1.0)
+        df["rm_gap_z"] = df["reward_train_rm_z"] - df["reward_judge_z"]
+
+    # flatten nested harness scores into harness_<task> columns for the CSV
+    if "harness" in df.columns:
+        flat = pd.json_normalize(df["harness"]).add_prefix("harness_")
+        df = pd.concat(
+            [df.drop(columns=["harness"]).reset_index(drop=True), flat.reset_index(drop=True)],
+            axis=1,
+        )
 
     df = df.sort_values(["arm", "hyperparam", "step"], na_position="first")
     out = results_root / "frontier.csv"

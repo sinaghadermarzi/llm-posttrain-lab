@@ -18,7 +18,7 @@ from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
 def main() -> None:
-    stage_yaml, overrides = parse_entry("stage1_sft_base.yaml")
+    stage_yaml, overrides = parse_entry("helpful/stage1_sft_base.yaml")
     cfg = load_config(stage_yaml, overrides)
     if is_done(cfg.output_dir):
         print(f"[sft] {cfg.output_dir} already DONE, skipping")

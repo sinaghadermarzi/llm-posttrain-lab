@@ -15,131 +15,138 @@ KL-regularized objective, but it optimizes a proxy on a fixed offline dataset,
 and in practice drifts in ways the derivation doesn't promise (famously, the
 log-probability of the *chosen* responses often falls during DPO training).
 
-The experiment makes this concrete with one plot: **reward achieved vs
-KL(policy ‖ reference)** — how much preference-reward each method buys per nat
-of distribution shift. Expected picture: PPO/GRPO trace efficient frontiers
-(reward up, KL bounded by the coefficient); SFT walks rightward with no control
-over KL; DPO lands between, with its β sweep as the knob; and the β=0 GRPO run
-shows what unconstrained reward optimization does (reward hacking, visible as
-train-RM/judge divergence).
+## Two task tracks, one question
 
-## Setup
+Both tracks share the model (`Qwen/Qwen2.5-1.5B`, full fine-tuning), the
+training stack (TRL 1.7 + accelerate/DeepSpeed), the pipeline shape, and the
+evaluation machinery — they differ only in what "reward" means:
 
-- **Task**: helpfulness alignment on [`HuggingFaceH4/ultrafeedback_binarized`](https://huggingface.co/datasets/HuggingFaceH4/ultrafeedback_binarized)
-- **Model**: [`Qwen/Qwen2.5-1.5B`](https://huggingface.co/Qwen/Qwen2.5-1.5B) (base), full fine-tuning
-- **Framework**: [TRL](https://github.com/huggingface/trl) 1.7 + accelerate/DeepSpeed
-- **Hardware target**: one node with 4× A100 80GB, ~2.5–3 days total
+| | **helpful** | **math** |
+|---|---|---|
+| Dataset | [`HuggingFaceH4/ultrafeedback_binarized`](https://huggingface.co/datasets/HuggingFaceH4/ultrafeedback_binarized) | [`openai/gsm8k`](https://huggingface.co/datasets/openai/gsm8k) |
+| Reward | learned preference RM (+ held-out Skywork judge for eval) | **verifiable**: exact answer match (`src/posttrain_lab/tasks/gsm8k.py`) |
+| Arms | SFT / DPO / PPO / GRPO | SFT / DPO (self-generated pairs) / GRPO |
+| Headline metric | judge reward vs KL | pass@1 vs KL (+ pass@8) |
+| Preference pairs | human-annotated | **self-generated**: sample 8 solutions/prompt from π_SFT-math, correct=chosen vs incorrect=rejected |
 
-### Pipeline
+PPO is deliberately absent from the math track: TRL's PPOTrainer requires an
+`nn.Module` reward model, while a verifier is a function; GRPO natively accepts
+callable rewards and is the community-standard RLVR setup. The PPO-vs-GRPO
+evidence lives on the helpful track. (Escape hatch: train an RM on the
+self-generated pairs and reuse the PPO wrapper unchanged.)
+
+### Pipelines
 
 ```
-Qwen2.5-1.5B (base)
-   │  stage 1: SFT on train_sft (~61k conversations)
-   ▼
-π_SFT  ── shared starting point of every arm AND the KL reference for eval
-   │  stage 2: RewardTrainer on train_prefs → RM (gated: pairwise acc ≥ 0.65)
-   ▼
-stage 3 arms (all start from π_SFT):
-   SFT   continued SFT on chosen responses      no KL knob (that's the point)
-   DPO   train_prefs pairs                      β ∈ {0.01, 0.05, 0.1, 0.3}
-   PPO   train_gen prompts + RM                 kl_coef ∈ {0.02, 0.05, 0.1}
-   GRPO  train_gen prompts + RM (vLLM colocate) β ∈ {0.0, 0.01, 0.04, 0.1}
-   │  stage 4: per-checkpoint eval → frontier points
-   ▼
-stage 5: results/figures/frontier.png
+helpful:  base → SFT(train_sft) → π_SFT → RM (acc-gated) → arms:
+            SFT(chosen) | DPO β∈{.01,.05,.1,.3} | PPO c∈{.02,.05,.1} | GRPO β∈{0,.01,.04,.1}
+math:     base → SFT(gold CoT) → π_SFT-math → self-gen pairs → arms:
+            SFT(gold) | DPO β∈{.01,.05,.1,.3} | GRPO(verifier) β∈{0,.01,.04,.1}
 ```
 
-Why start from the **base** model instead of Qwen2.5-1.5B-Instruct: the Instruct
-model already embeds Qwen's own RLHF, which would muddy both the reference
-distribution and the reward headroom. If π_SFT chat quality disappoints, set
-`model.base: Qwen/Qwen2.5-1.5B-Instruct` in `configs/base.yaml` and skip stage 1.
+Each task's π_SFT is both the shared starting point of its arms and the KL
+reference for its eval; the β=0 GRPO runs trace what *unconstrained* reward
+optimization does.
 
-### Evaluation (stage 4) — every checkpoint becomes one frontier point
+## Evaluation — every checkpoint becomes one frontier point
 
-- 512 held-out `test_prefs` prompts × 4 samples at temperature 1.0 / top-p 1.0
-  (sampling from the true policy distribution keeps the KL estimate unbiased).
-- **KL(π ‖ π_SFT)**: exact response-token logprobs from two batched HF forward
-  passes; sequence KL via the low-variance k3 estimator (`r − 1 − log r`,
-  Schulman), k1 logged as cross-check.
-- **Two rewards per point**: the stage-2 training RM (the objective PPO/GRPO
-  optimized) and a held-out judge, `Skywork/Skywork-Reward-V2-Llama-3.1-8B`,
-  which no method ever saw. Both z-scored against π_SFT's score distribution.
-  A widening train-RM/judge gap = reward hacking, and is itself a deliverable.
-- Diagnostics logged for free: response length, token entropy (mode-collapse
-  indicators), and DPO's chosen/rejected logprob trajectories.
+Per checkpoint: sample N responses per held-out prompt at temperature 1.0
+(unbiased MC), then compute **metric groups** (per-task list in
+`configs/tasks/*.yaml`):
+
+| Group | Evidence | Key outputs |
+|---|---|---|
+| `core` / `core_math` | the frontier | k3/k1 sequence-KL vs π_SFT; dual reward scores (helpful) or pass@1/pass@8 (math) |
+| `retention_ppl` | capability retention | wikitext-2 perplexity |
+| `retention_harness` | capability retention | lm-eval HellaSwag/ARC accuracy (all checkpoints by default — `eval.harness.which: final` to economize) |
+| `diversity` | mode collapse | distinct-1/2/3, self-BLEU across the N samples (reused, not regenerated) |
+| `pref_logps` | DPO failure modes | held-out logp(chosen), logp(rejected), margin — for EVERY arm |
+
+**Metric groups are incremental**: each checkpoint has one summary row; a group
+runs only if its keys are missing (atomic read-merge-replace). Adding a group
+to the config later and re-running `make eval` computes only the new metrics —
+nothing is regenerated. (Corollary: don't tail the summary files; they are
+rewritten, not appended.)
 
 ## Quickstart
 
 ```bash
-pip install -e .                    # analysis/data work
-pip install -r requirements.txt    # exact pinned training stack (GPU node)
+pip install -r requirements.txt && pip install -e .
 
-make smoke      # REQUIRED first: full 6-stage pipeline on Qwen2.5-0.5B,
-                # tiny slices, 1 GPU, <30 min. Gates all API/version drift.
+make smoke        # REQUIRED first: both tracks end-to-end on Qwen2.5-0.5B,
+                  # tiny slices, 1 GPU, <30 min. Gates all API/version drift,
+                  # both reward paths, and every metric group.
 
-./scripts/run_all.sh   # the real thing: ~2.5-3 days on 4x A100 80GB
+make helpful-all  # ~2.5-3 days on 4x A100 80GB (+~15-20h for harness-everywhere)
+make math-all     # ~12-15 h on 4x A100 80GB
 ```
 
-Every stage is idempotent (DONE markers, per-checkpoint eval skip), so
-`run_all.sh` can be re-run after any crash/preemption and continues where it
-stopped. Stages can also be run individually:
+Everything is idempotent (DONE markers, incremental eval): re-run any script
+after a crash and it continues. Per-stage targets:
 
-| Stage | Command | Est. wall-clock (4×A100) |
+| helpful | math | |
 |---|---|---|
-| 0 smoke | `make smoke` | ~30 min (1 GPU) |
-| 1 π_SFT | `make sft-base` | 2–3 h |
-| 2 reward model | `make rm` | 2–3 h |
-| 3a SFT arm | `make arm-sft` | ~2 h |
-| 3b DPO sweep ×4 | `make arm-dpo` | 4–6 h (parallel, 1 GPU each) |
-| 3c PPO sweep ×3 | `make arm-ppo` | 15–21 h (sequential, full node) |
-| 3d GRPO sweep ×4 | `make arm-grpo` | 9–14 h (sequential, full node) |
-| 4 eval all ckpts | `make eval` | ~3 h (sharded across GPUs) |
-| 5 figures | `make plots` | minutes |
+| `make sft-base` | `make math-sft-base` | π_SFT (2–3 h / ~30 min) |
+| `make rm` | `make math-pairs` | RM (2–3 h) / self-gen pairs (~1 h) |
+| `make arm-sft arm-dpo` | `make math-arm-sft math-arm-dpo` | imitation + DPO sweep |
+| `make arm-ppo arm-grpo` | `make math-arm-grpo` | RL sweeps (the long pole) |
+| `make eval` | `make math-eval` | sharded, incremental |
+| `make plots` | `make math-plots` | figures |
 
-Overrides are OmegaConf dotlist args, e.g.
-`python -m posttrain_lab.train.dpo configs/arm_dpo.yaml train.beta=0.2`.
-Sweep grids live in `configs/sweeps.yaml`. Disk: budget ~250 GB for
-checkpoints + HF cache (`results_root` is configurable).
+Overrides are OmegaConf dotlist args
+(`python -m posttrain_lab.train.dpo configs/math/m3_arm_dpo.yaml train.beta=0.2`);
+grids live in `configs/{helpful,math}/sweeps.yaml`. Disk: ~250 GB helpful,
+~60 GB math.
 
-## Reading the figures
+## Reading the figures (`results/<task>/figures/`)
 
-- **`frontier.png`** (the headline): judge reward (left) and train-RM reward
-  (right) vs sequence KL from π_SFT. Up-and-left is good. Each curve is one
-  run's checkpoints in training order, labeled with its KL-knob value; the
-  star is π_SFT. Look for: RL curves dominating at fixed KL; the SFT curve
-  marching right without a knob to stop it; β=0 GRPO soaring on the right
-  panel while sagging on the left (pure reward hacking).
-- **`dpo_logps.png`**: DPO's chosen (solid) and rejected (dashed) logprobs —
-  the "squeezing" failure mode where both decline: DPO increases the *margin*
-  while moving mass off the preference data entirely.
-- **`diagnostics.png`**: length-vs-KL (length hacking), entropy-vs-KL (mode
-  collapse), and the train-RM−judge gap vs KL (reward hacking, quantified).
+- **`frontier.png`** (helpful): judge reward (left) vs training-RM reward
+  (right) vs KL. Up-and-left wins; a right panel soaring while the left sags
+  is reward hacking, quantified in `diagnostics.png`'s RM-gap panel.
+- **`frontier_math.png`**: pass@1 vs KL and pass@8 vs KL. Watch whether a
+  method buys pass@1 by collapsing pass@8 (diversity spent) or keeps both
+  (diversity preserved).
+- **`retention.png`**: wikitext PPL + benchmark accuracy vs KL — the alignment
+  tax. Flat = preference gained without capability lost.
+- **`diversity.png`**: distinct-2 / self-BLEU / token-NLL vs KL (+ pass-gap
+  panel on math) — the mode-collapse signature.
+- **`pref_logps.png`**: held-out chosen (solid) / rejected (dashed) logp per
+  arm — is the "squeezing effect" (both fall, margin grows) DPO-specific?
+- **`dpo_logps.png`**: the same phenomenon in DPO's own training logs.
 
 ## Repo map
 
 ```
-configs/            all hyperparameters; base.yaml + per-stage + sweeps.yaml + smoke.yaml
+configs/
+  base.yaml               task-agnostic defaults (merge order documented inside)
+  tasks/{helpful,math}.yaml   per-task datasets, graders, metric groups
+  helpful/  math/         per-task stage configs + sweeps.yaml
+  eval.yaml smoke.yaml    global eval knobs; global tiny-mode override
 src/posttrain_lab/
-  data.py           UltraFeedback loaders (sft / preference / prompt-only / eval prompts)
-  train/            thin TRL wrappers: sft, rm, dpo, ppo, grpo
-  eval/             generate → kl (k3/k1) → dual reward scoring → per-ckpt driver
-  utils/            checkpoint discovery, DONE markers, offline-first logging
-analysis/           aggregate.py → frontier.csv, frontier_plot.py, diagnostics.py
-scripts/            stage launch scripts + run_all.sh orchestration
+  data.py                 loaders dispatching on dataset.format (ultrafeedback | gsm8k | pairs_disk)
+  tasks/gsm8k.py          THE verifier (extraction, correctness, TRL reward_funcs)
+  gen_pairs.py            math m2: self-generated preference pairs + stats.json
+  train/                  thin TRL wrappers (the swappable layer for future verl/OpenRLHF)
+  eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
+analysis/                 aggregate → frontier.csv; frontier, frontier_math, retention, diversity, pref_logps, diagnostics
+scripts/{helpful,math}/   per-stage launchers; run_all_{helpful,math}.sh; run_smoke.sh
 ```
 
 ## Known risks / gotchas
 
-- **TRL API drift**: PPOTrainer currently lives in `trl.experimental.ppo`
-  (imported defensively in `train/ppo.py`); GRPO config fields have shifted
-  across minors. The pins in `requirements.txt` are load-bearing — bump trl
-  and vllm *as a pair* (TRL 1.7 supports vllm 0.13–0.23) and re-run `make smoke`.
-- **PPO memory**: four 1.5B models resident (policy/ref/RM/value). Fine under
-  ZeRO-2 on 80GB; if OOM, lower `train.local_rollout_forward_batch_size` first.
-- **GRPO vLLM colocate**: training and vLLM share GPUs;
-  `vllm_gpu_memory_utilization: 0.25` is the starting point — too high OOMs
-  the trainer, too low OOMs the KV cache.
+- **TRL API drift**: PPOTrainer lives in `trl.experimental.ppo` (defensive
+  import); pins in `requirements.txt` are load-bearing — bump trl+vllm as a
+  pair and re-run `make smoke`.
+- **PPO memory** (helpful): 4 models resident; lower
+  `train.local_rollout_forward_batch_size` first on OOM.
+- **vLLM colocate** (GRPO): `vllm_gpu_memory_utilization: 0.25` is the start point.
+- **Self-gen pair yield** (math): prompts where all samples are correct or all
+  wrong yield no pairs — check `stats.json` after `make math-pairs`; knobs are
+  k, temperature, `pairs.max_per_prompt`. The pairs carry a selection bias
+  (only contested prompts) — remember it when reading DPO-math results.
+- **GRPO zero-variance groups** (math): all-correct/all-wrong rollout groups
+  contribute zero advantage — expected RLVR behavior, visible as wasted rollouts
+  at very high/low accuracy.
 - **Reward hacking / length bias** at weak KL penalties is expected — it is
   part of the story the diagnostics make visible, not a bug to silence.
-- **flash-attn** is commented out in requirements; install it on the node if
-  you want it, or set `model.attn_implementation: sdpa`.
+- **flash-attn** optional; without it set `model.attn_implementation: sdpa`.

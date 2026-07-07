@@ -1,5 +1,6 @@
 # Stage 1: build pi_SFT from the base model on UltraFeedback's SFT split.
 # pi_SFT is both the shared starting point of all arms and the KL reference for eval.
+task: helpful
 stage: sft
 run_name: sft-base
 output_dir: ${results_root}/runs/sft-base_seed${seed}
