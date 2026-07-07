@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Arm DPO: one run per beta in sweeps.yaml, launched in parallel, one GPU each.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 NGPU="${NGPU:-4}"
 
 mapfile -t OVERRIDES < <(python -m posttrain_lab.config helpful dpo)

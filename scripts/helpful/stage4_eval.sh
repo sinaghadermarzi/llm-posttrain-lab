@@ -3,7 +3,7 @@
 # sharded across GPUs. Already-evaluated checkpoints are skipped, so this is
 # safe to re-run any time new checkpoints appear.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 NGPU="${NGPU:-4}"
 
 for i in $(seq 0 $((NGPU - 1))); do
