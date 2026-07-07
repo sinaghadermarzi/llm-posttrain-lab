@@ -1,0 +1,8 @@
+# Hyperparameter grids consumed by scripts/stage3*.sh (via posttrain_lab.config sweep helper).
+# Each value becomes one training run -> one curve in the frontier plot.
+dpo:
+  train.beta: [0.01, 0.05, 0.1, 0.3]
+ppo:
+  train.kl_coef: [0.02, 0.05, 0.1]   # if over budget, drop 0.1 first (GRPO covers that regime)
+grpo:
+  train.beta: [0.0, 0.01, 0.04, 0.1] # 0.0 = unconstrained RL, expected to reward-hack

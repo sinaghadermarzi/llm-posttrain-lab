@@ -1,0 +1,17 @@
+# Stage 4: per-checkpoint evaluation -> one frontier point each.
+eval:
+  prompts_split: test_prefs
+  num_prompts: 512
+  samples_per_prompt: 4
+  # Unbiased Monte-Carlo KL requires sampling from the actual policy distribution:
+  temperature: 1.0
+  top_p: 1.0
+  max_new_tokens: 512
+  kl_estimator: k3               # k1 is always logged as cross-check
+  logprob_batch_size: 8
+  reference: ${paths.sft_base}   # KL is measured against pi_SFT
+  train_rm: ${paths.reward_model}
+  judge: Skywork/Skywork-Reward-V2-Llama-3.1-8B
+  judge_batch_size: 4
+  use_vllm: true                 # HF generate fallback if vllm unavailable
+  out_dir: ${results_root}/eval
