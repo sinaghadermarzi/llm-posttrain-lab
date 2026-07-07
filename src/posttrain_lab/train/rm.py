@@ -22,7 +22,7 @@ from posttrain_lab.utils.logging import append_jsonl
 
 
 def main() -> None:
-    stage_yaml, overrides = parse_entry("stage2_rm.yaml")
+    stage_yaml, overrides = parse_entry("helpful/stage2_rm.yaml")
     cfg = load_config(stage_yaml, overrides)
     if is_done(cfg.output_dir):
         print(f"[rm] {cfg.output_dir} already DONE, skipping")

@@ -1,33 +1,89 @@
-"""Per-checkpoint evaluation driver: generate -> KL -> dual reward scores.
+"""Per-checkpoint evaluation driver — incremental metric groups.
 
-Each checkpoint becomes one summary row (a frontier point) in
-results/eval/<run>/<ckpt>.jsonl plus a per-sample file <ckpt>.samples.jsonl
-(responses with individual scores — needed later for z-scoring against the
-pi_SFT baseline). Already-evaluated checkpoints are skipped, so re-running
-after preemption or after new training runs only does new work.
+Each checkpoint has ONE summary row (a frontier point) in
+results/<task>/eval/<run>/<ckpt>.jsonl plus a per-sample file
+<ckpt>.samples.jsonl. Metrics are organized into groups (cfg.eval.
+metric_groups, set per task); each group declares sentinel keys, and a group
+runs only when its sentinels are missing from the existing row. The row is
+atomically rewritten after every group, so:
+
+  - re-running after a crash/preemption resumes at the missing groups
+  - adding a new group to the config later computes ONLY that group on
+    already-evaluated checkpoints (e.g. backfilling retention/diversity/
+    pref_logps onto the helpful track)
 
 Usage:
-    python -m posttrain_lab.eval.run_eval [--smoke] [--shard i/n] [k=v ...] [ckpt_dir ...]
+    python -m posttrain_lab.eval.run_eval [task=math] [--smoke] [--shard i/n] [k=v ...] [ckpt_dir ...]
 
 With no explicit checkpoint dirs, discovers every policy checkpoint under
 <results_root>/runs (all arms + sft-base, excluding the RM). --shard i/n
-keeps only every n-th checkpoint starting at i — used by stage4_eval.sh to
-spread checkpoints across GPUs.
+keeps every n-th checkpoint starting at i (used by the eval scripts to
+spread checkpoints across GPUs; safe because groups touch one row each).
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import sys
 from pathlib import Path
 
 from posttrain_lab.config import load_config
 from posttrain_lab.data import eval_prompts
+from posttrain_lab.eval import diversity, pref_logps, retention
 from posttrain_lab.eval.generate import sample_responses
 from posttrain_lab.eval.kl import compute_kl
+from posttrain_lab.eval.passk import passk_metrics
 from posttrain_lab.eval.reward_score import score_samples
-from posttrain_lab.utils.checkpoints import discover_all_checkpoints, run_arm, run_hyperparam
-from posttrain_lab.utils.logging import append_jsonl
+from posttrain_lab.tasks.gsm8k import is_correct
+from posttrain_lab.utils.checkpoints import discover_all_checkpoints, list_checkpoints, run_arm, run_hyperparam
+
+
+def _core_helpful(cfg, ckpt, ctx) -> dict:
+    """Generate -> KL vs pi_SFT -> dual reward scoring (training RM + judge)."""
+    samples = sample_responses(cfg, str(ckpt), ctx["prompts"])
+    kl_stats = compute_kl(cfg, str(ckpt), samples)
+    rm_scores = score_samples(cfg, str(cfg.eval.train_rm), samples, int(cfg.eval.judge_batch_size))
+    judge_scores = score_samples(cfg, str(cfg.eval.judge), samples, int(cfg.eval.judge_batch_size))
+    for sample, rm_score, judge_score in zip(samples, rm_scores, judge_scores):
+        sample["score_train_rm"] = rm_score
+        sample["score_judge"] = judge_score
+    ctx["write_samples"](samples)
+
+    n = max(len(samples), 1)
+    return {
+        **kl_stats,
+        "reward_train_rm": sum(rm_scores) / n,
+        "reward_judge": sum(judge_scores) / n,
+        "num_samples": len(samples),
+    }
+
+
+def _core_math(cfg, ckpt, ctx) -> dict:
+    """Generate -> KL vs pi_SFT-math -> verify -> pass@1 / pass@k."""
+    samples = sample_responses(cfg, str(ckpt), ctx["prompts"])
+    kl_stats = compute_kl(cfg, str(ckpt), samples)
+    gold = {p["prompt_id"]: p["answer"] for p in ctx["prompts"]}
+    for sample in samples:
+        sample["correct"] = is_correct(sample["response"], gold[sample["prompt_id"]])
+    ctx["write_samples"](samples)
+    return {
+        **kl_stats,
+        **passk_metrics(samples, int(cfg.eval.pass_k)),
+        "num_samples": len(samples),
+    }
+
+
+# group name -> (sentinel keys, compute_fn(cfg, ckpt, ctx) -> partial row)
+GROUPS = {
+    "core": (["kl_k3", "reward_train_rm", "reward_judge"], _core_helpful),
+    "core_math": (["kl_k3", "pass1"], _core_math),
+    "retention_ppl": (["ppl_wikitext"], retention.ppl_group),
+    "retention_harness": (["harness"], retention.harness_group),
+    "diversity": (["distinct_2", "self_bleu"], diversity.compute_group),
+    "pref_logps": (["logp_chosen"], pref_logps.compute_group),
+}
 
 
 def _parse_args(argv: list[str]) -> tuple[list[str], tuple[int, int], list[str]]:
@@ -53,39 +109,71 @@ def _ckpt_step(ckpt: Path) -> int:
     return int(m.group(1)) if m else -1  # -1 = final flat save
 
 
+def _read_row(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    with path.open() as f:
+        for line in f:
+            if line.strip():
+                return json.loads(line)
+    return None
+
+
+def _atomic_write_row(path: Path, row: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(row) + "\n")
+    os.replace(tmp, path)
+
+
 def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
     run_dir = ckpt.parent if ckpt.name.startswith("checkpoint-") else ckpt
     out_dir = Path(cfg.eval.out_dir) / run_dir.name
     summary_path = out_dir / f"{ckpt.name}.jsonl"
-    if summary_path.exists():
-        print(f"[eval] {summary_path} exists, skipping")
-        return
-    print(f"[eval] {ckpt}")
-
-    samples = sample_responses(cfg, str(ckpt), prompts)
-    kl_stats = compute_kl(cfg, str(ckpt), samples)
-    rm_scores = score_samples(cfg, str(cfg.eval.train_rm), samples, int(cfg.eval.judge_batch_size))
-    judge_scores = score_samples(cfg, str(cfg.eval.judge), samples, int(cfg.eval.judge_batch_size))
-
     samples_path = out_dir / f"{ckpt.name}.samples.jsonl"
-    for sample, rm_score, judge_score in zip(samples, rm_scores, judge_scores):
-        append_jsonl(samples_path, {**sample, "score_train_rm": rm_score, "score_judge": judge_score})
 
-    n = max(len(samples), 1)
-    append_jsonl(
-        summary_path,
-        {
-            "run": run_dir.name,
-            "arm": run_arm(run_dir),
-            "hyperparam": run_hyperparam(run_dir),
-            "checkpoint": str(ckpt),
-            "step": _ckpt_step(ckpt),
-            **kl_stats,
-            "reward_train_rm": sum(rm_scores) / n,
-            "reward_judge": sum(judge_scores) / n,
-            "num_samples": len(samples),
-        },
-    )
+    row = _read_row(summary_path) or {
+        "run": run_dir.name,
+        "arm": run_arm(run_dir),
+        "hyperparam": run_hyperparam(run_dir),
+        "checkpoint": str(ckpt),
+        "step": _ckpt_step(ckpt),
+    }
+    requested = [g for g in cfg.eval.metric_groups if g in GROUPS]
+    missing = [g for g in requested if any(key not in row for key in GROUPS[g][0])]
+    if not missing:
+        print(f"[eval] {summary_path} complete for {requested}, skipping")
+        return
+    print(f"[eval] {ckpt} -> groups {missing}")
+
+    samples_cache: list[dict] = []
+
+    def write_samples(samples: list[dict]) -> None:
+        samples_cache.clear()
+        samples_cache.extend(samples)
+        samples_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = samples_path.with_suffix(".tmp")
+        with tmp.open("w") as f:
+            for sample in samples:
+                f.write(json.dumps(sample) + "\n")
+        os.replace(tmp, samples_path)
+
+    def load_samples() -> list[dict]:
+        if samples_cache:
+            return samples_cache
+        with samples_path.open() as f:
+            samples_cache.extend(json.loads(line) for line in f if line.strip())
+        return samples_cache
+
+    ctx = {
+        "prompts": prompts,
+        "write_samples": write_samples,
+        "load_samples": load_samples,
+        "is_final": ckpt == list_checkpoints(run_dir)[-1],
+    }
+    for group in missing:
+        row.update(GROUPS[group][1](cfg, ckpt, ctx))
+        _atomic_write_row(summary_path, row)  # progress survives a crash mid-checkpoint
 
 
 def main() -> None:
@@ -100,7 +188,8 @@ def main() -> None:
     if not ckpts:
         print("[eval] no checkpoints found — train something first")
         return
-    print(f"[eval] {len(ckpts)} checkpoints (shard {shard_idx}/{shard_total})")
+    print(f"[eval] task={cfg.task}: {len(ckpts)} checkpoints (shard {shard_idx}/{shard_total}), "
+          f"groups={list(cfg.eval.metric_groups)}")
 
     prompts = eval_prompts(cfg)
     for ckpt in ckpts:

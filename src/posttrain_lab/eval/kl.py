@@ -22,7 +22,7 @@ from omegaconf import DictConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-def _response_logprobs(model, input_ids, attention_mask, response_mask):
+def response_logprobs(model, input_ids, attention_mask, response_mask):
     """Logprob of each realized token, zeroed outside the response span."""
     with torch.no_grad():
         logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
@@ -65,8 +65,8 @@ def compute_kl(cfg: DictConfig, policy_path: str, samples: list[dict]) -> dict:
         for i, plen in enumerate(prompt_lens):
             response_mask[i, :plen] = 0
 
-        lp_pi = _response_logprobs(policy, input_ids, attention_mask, response_mask)
-        lp_ref = _response_logprobs(reference, input_ids, attention_mask, response_mask)
+        lp_pi = response_logprobs(policy, input_ids, attention_mask, response_mask)
+        lp_ref = response_logprobs(reference, input_ids, attention_mask, response_mask)
 
         mask = response_mask[:, 1:].bool()
         log_r = (lp_ref - lp_pi) * mask  # log(pi_ref / pi) per response token

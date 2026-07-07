@@ -1,6 +1,7 @@
 # Arm DPO: offline preference optimization from pi_SFT (reference = pi_SFT).
 # beta is the implicit KL knob; sweep values come from sweeps.yaml (CLI override:
 #   python -m posttrain_lab.train.dpo ... train.beta=0.1).
+task: helpful
 stage: dpo
 run_name: dpo-beta${train.beta}
 output_dir: ${results_root}/runs/dpo_beta${train.beta}_seed${seed}
