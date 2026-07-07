@@ -1,0 +1,21 @@
+# experiment outputs
+results/*
+!results/.gitkeep
+wandb/
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/
+
+# hf / tools caches
+.cache/
+hf_cache/
+
+# large artifacts
+*.safetensors
+*.bin
+*.pt
