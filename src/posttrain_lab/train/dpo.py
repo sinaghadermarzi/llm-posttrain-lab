@@ -20,7 +20,7 @@ from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
 def main() -> None:
-    stage_yaml, overrides = parse_entry("arm_dpo.yaml")
+    stage_yaml, overrides = parse_entry("helpful/arm_dpo.yaml")
     cfg = load_config(stage_yaml, overrides)
     if is_done(cfg.output_dir):
         print(f"[dpo] {cfg.output_dir} already DONE, skipping")

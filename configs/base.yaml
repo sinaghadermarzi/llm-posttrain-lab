@@ -1,14 +1,18 @@
-# Shared settings, merged under every stage config (stage yaml wins on conflict).
+# Shared task-agnostic settings. Merge order:
+#   base.yaml -> tasks/<task>.yaml -> stage yaml -> smoke.yaml (--smoke) -> CLI dotlist
 seed: 17
-results_root: results
-
-dataset:
-  id: HuggingFaceH4/ultrafeedback_binarized
+task: helpful
+results_root: results/${task}
 
 model:
   base: Qwen/Qwen2.5-1.5B          # escape hatch: Qwen/Qwen2.5-1.5B-Instruct (then skip stage 1)
   dtype: bfloat16
   attn_implementation: flash_attention_2   # set to "sdpa" if flash-attn is not installed
+
+# Defaults so eval-only stages can call the data loaders without a data block.
+data:
+  split: null
+  max_samples: null
 
 # Canonical artifact locations consumed by later stages.
 paths:

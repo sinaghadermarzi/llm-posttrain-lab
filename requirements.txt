@@ -10,6 +10,7 @@ datasets==5.0.0
 accelerate==1.14.0
 peft==0.19.1
 omegaconf==2.3.1
+lm-eval==0.4.12
 # torch is deliberately unpinned: vllm ships wheels built against an exact
 # torch version and will pull the matching one. (Verified with torch 2.12.1.)
 torch

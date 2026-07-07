@@ -1,12 +1,16 @@
-"""Config loading: base.yaml + stage yaml (+ smoke.yaml) + CLI dotlist overrides.
+"""Config loading with a task dimension. Resolution order::
+
+    base.yaml -> configs/tasks/<task>.yaml -> <stage yaml> -> smoke.yaml (--smoke) -> CLI dotlist
 
 Every entry point calls::
 
-    cfg = load_config("configs/arm_dpo.yaml", sys.argv[1:])
+    cfg = load_config("configs/helpful/arm_dpo.yaml", sys.argv[1:])
 
-CLI args are OmegaConf dotlist overrides (``train.beta=0.05``). The special
-flag ``--smoke`` (or env ``SMOKE=1``) additionally merges configs/smoke.yaml
-on top, shrinking every stage to a minutes-scale run.
+The task is read in a pre-pass from the stage yaml's ``task:`` key (a
+``task=`` dotlist arg wins), then the full merge runs. CLI args are OmegaConf
+dotlist overrides (``train.beta=0.05``). The special flag ``--smoke`` (or env
+``SMOKE=1``) merges configs/smoke.yaml, shrinking every stage of either task
+to a minutes-scale run.
 """
 
 from __future__ import annotations
@@ -28,11 +32,22 @@ def load_config(stage_yaml: str | Path, argv: list[str] | None = None) -> DictCo
         smoke = True
         argv.remove("--smoke")
 
-    cfg = OmegaConf.load(CONFIG_DIR / "base.yaml")
     stage_path = Path(stage_yaml)
     if not stage_path.exists():
         stage_path = CONFIG_DIR / stage_yaml
-    cfg = OmegaConf.merge(cfg, OmegaConf.load(stage_path))
+    stage_cfg = OmegaConf.load(stage_path)
+
+    task = stage_cfg.get("task", "helpful")
+    for arg in argv:
+        if arg.startswith("task="):
+            task = arg.split("=", 1)[1]
+
+    cfg = OmegaConf.merge(
+        OmegaConf.load(CONFIG_DIR / "base.yaml"),
+        OmegaConf.load(CONFIG_DIR / "tasks" / f"{task}.yaml"),
+        stage_cfg,
+        OmegaConf.create({"task": str(task)}),
+    )
     if smoke:
         cfg = OmegaConf.merge(cfg, OmegaConf.load(CONFIG_DIR / "smoke.yaml"))
     if argv:
@@ -89,13 +104,15 @@ def train_kwargs(cfg: DictConfig, config_cls) -> dict:
 
 
 def _sweep_cli() -> None:
-    """Print sweep override values for a stage, one per line (used by scripts/)."""
+    """Print sweep override values for a task's stage, one per line (used by
+    scripts/): ``python -m posttrain_lab.config helpful dpo``."""
     import argparse
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("task", choices=["helpful", "math"])
     parser.add_argument("stage", choices=["dpo", "ppo", "grpo"])
     args = parser.parse_args()
-    sweeps = OmegaConf.load(CONFIG_DIR / "sweeps.yaml")[args.stage]
+    sweeps = OmegaConf.load(CONFIG_DIR / args.task / "sweeps.yaml")[args.stage]
     for key, values in sweeps.items():
         for value in values:
             print(f"{key}={value}")

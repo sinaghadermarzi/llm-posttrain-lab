@@ -1,10 +1,14 @@
-"""GRPO arm — online RL from pi_SFT with the stage-2 reward model.
+"""GRPO arm — online RL from pi_SFT, both tracks.
 
 Group-relative advantages, no value model; beta is the KL coefficient to the
-frozen reference (pi_SFT). reward_funcs takes the RM checkpoint path and TRL
-loads it as a sequence-classification reward model.
+frozen reference (pi_SFT). The reward dispatches on config:
+  reward_model_path set   -> RM checkpoint path, TRL loads it as a
+                             sequence-classification reward model (helpful)
+  reward: verifier        -> tasks/gsm8k.verifier_reward callable; the gold
+                             answer reaches it via the dataset's extra
+                             'answer' column (math / RLVR)
 
-Usage: python -m posttrain_lab.train.grpo [configs/arm_grpo.yaml] train.beta=0.04 ...
+Usage: python -m posttrain_lab.train.grpo [configs/helpful/arm_grpo.yaml] train.beta=0.04 ...
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
 def main() -> None:
-    stage_yaml, overrides = parse_entry("arm_grpo.yaml")
+    stage_yaml, overrides = parse_entry("helpful/arm_grpo.yaml")
     cfg = load_config(stage_yaml, overrides)
     if is_done(cfg.output_dir):
         print(f"[grpo] {cfg.output_dir} already DONE, skipping")
@@ -28,6 +32,13 @@ def main() -> None:
     src = init_path(cfg)
     tokenizer = load_tokenizer(src)
 
+    if cfg.get("reward") == "verifier":
+        from posttrain_lab.tasks.gsm8k import verifier_reward
+
+        reward_funcs = verifier_reward
+    else:
+        reward_funcs = str(cfg.reward_model_path)
+
     args = GRPOConfig(
         output_dir=str(cfg.output_dir),
         run_name=str(cfg.run_name),
@@ -36,7 +47,7 @@ def main() -> None:
     )
     trainer = GRPOTrainer(
         model=src,
-        reward_funcs=str(cfg.reward_model_path),
+        reward_funcs=reward_funcs,
         args=args,
         train_dataset=prompt_dataset(cfg),
         processing_class=tokenizer,
