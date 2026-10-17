@@ -1,10 +1,17 @@
-.PHONY: preflight smoke all \
+.PHONY: preflight prefetch smoke all \
 	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-grpo math-eval math-plots math-all
 
 # node readiness: GPUs, NCCL, libs, HF assets, MLflow (see notebooks/onboarding.ipynb)
 preflight:
 	python -m posttrain_lab.preflight
+
+# on a machine WITH internet: download every HF asset into PREFETCH_DIR, then
+# verify it loads offline; copy that dir to a PVC used as HF_HOME (see README)
+PREFETCH_DIR ?= hf_cache
+PREFETCH_ARGS ?=
+prefetch:
+	python scripts/prefetch_assets.py $(PREFETCH_DIR) $(PREFETCH_ARGS)
 
 smoke:
 	bash scripts/run_smoke.sh
