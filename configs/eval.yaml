@@ -14,6 +14,14 @@ eval:
   out_dir: ${results_root}/eval
   # capability retention (both tracks)
   retention:
+    # Hub dataset (via HF_ENDPOINT, or the offline cache: scripts/prefetch_assets.py).
+    # Must be namespaced: the bare 'wikitext' id fails under huggingface_hub 1.x.
+    dataset: Salesforce/wikitext
+    config: wikitext-2-raw-v1
+    split: test
+    # Or local parquet file(s)/glob of that split, e.g. a copy of the repo's
+    # wikitext-2-raw-v1/test-00000-of-00001.parquet; overrides the three keys above.
+    data_files: null
     max_tokens: 200000           # wikitext-2 test token cap for the PPL pass
   harness:
     tasks: [hellaswag, arc_easy, arc_challenge]
