@@ -26,9 +26,11 @@ train:
   logging_steps: 10
   save_only_model: true            # weight-only checkpoints (~3GB each at 1.5B)
   save_total_limit: null
-  report_to: wandb
+  report_to: mlflow
   remove_unused_columns: false
 
-wandb:
-  project: llm-posttrain-lab
-  mode: offline                    # set WANDB_MODE=online (or edit) to sync
+# Training metrics via HF/TRL's MLflowCallback; eval metrics are attached to
+# the same run as eval/<key> at each checkpoint's step (utils/logging.py).
+mlflow:
+  experiment: llm-posttrain-lab-${task}
+  tracking_uri: null               # null = use MLFLOW_TRACKING_URI from the pod env

@@ -70,9 +70,21 @@ rewritten, not appended.)
 
 ## Quickstart
 
+New node? Walk through [`notebooks/onboarding.ipynb`](notebooks/onboarding.ipynb)
+first. It sets up `.env` (MLflow endpoint) and checks packages, `/dev/shm`, GPUs + NCCL,
+flash-attn/DeepSpeed/vLLM, Hugging Face assets (offline cluster) and MLflow, one
+section each. The same checks run headless with `make preflight` or
+`python -m posttrain_lab.preflight gpu mlflow ...`.
+
+Tracking is MLflow (`report_to: mlflow`). Set `MLFLOW_TRACKING_URI` (and optionally
+`MLFLOW_PORT`) in `.env` or the pod env. Runs land in experiment
+`llm-posttrain-lab-<task>`, tagged with `arm`, `hyperparam`, `seed` and `run_dir`; eval
+metrics are attached to each training run as `eval/*` at the checkpoint's step.
+
 ```bash
 pip install -r requirements.txt && pip install -e .
 
+make preflight    # node readiness (GPUs, NCCL, HF assets, MLflow)
 make smoke        # REQUIRED first: both tracks end-to-end on Qwen2.5-0.5B,
                   # tiny slices, 1 GPU, <30 min. Gates all API/version drift,
                   # both reward paths, and every metric group.

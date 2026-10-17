@@ -1,7 +1,9 @@
 # experiment outputs
 results/*
 !results/.gitkeep
-wandb/
+
+# local secrets / endpoints (see .env.example)
+.env
 
 # python
 __pycache__/

@@ -17,7 +17,7 @@ dependencies = [
     "peft",
     "omegaconf",
     "lm-eval",
-    "wandb",
+    "mlflow-skinny",
     "pandas",
     "matplotlib",
     "seaborn",
