@@ -38,6 +38,7 @@ from posttrain_lab.eval.passk import passk_metrics
 from posttrain_lab.eval.reward_score import score_samples
 from posttrain_lab.tasks.gsm8k import is_correct
 from posttrain_lab.utils.checkpoints import discover_all_checkpoints, list_checkpoints, run_arm, run_hyperparam
+from posttrain_lab.utils.logging import log_eval_metrics
 
 
 def _core_helpful(cfg, ckpt, ctx) -> dict:
@@ -172,8 +173,10 @@ def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
         "is_final": ckpt == list_checkpoints(run_dir)[-1],
     }
     for group in missing:
-        row.update(GROUPS[group][1](cfg, ckpt, ctx))
+        metrics = GROUPS[group][1](cfg, ckpt, ctx)
+        row.update(metrics)
         _atomic_write_row(summary_path, row)  # progress survives a crash mid-checkpoint
+        log_eval_metrics(cfg, run_dir, row["step"], metrics)  # only the newly computed group
 
 
 def main() -> None:
