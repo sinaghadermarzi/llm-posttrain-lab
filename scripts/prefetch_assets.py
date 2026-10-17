@@ -34,9 +34,25 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))  # works without `pip install -e .`
 
-# Everything must land under the chosen HF_HOME; these would redirect parts of it.
-CACHE_OVERRIDES = ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_DATASETS_CACHE", "TRANSFORMERS_CACHE")
 OFFLINE_FLAGS = ("HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE", "TRANSFORMERS_OFFLINE")
+LEGACY_CACHES = ("HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE")  # superseded by HF_HUB_CACHE
+
+
+def pin_hf_env(hf_home: Path, offline: bool) -> None:
+    """Point every HF cache at hf_home and set the offline flags, overriding
+    the env and .env alike. Values must be set, not just removed: `import
+    posttrain_lab` fills unset HF_* keys from .env, e.g. HF_HUB_OFFLINE=1 from
+    a cluster-style .env, which would make this run offline."""
+    pinned = {"HF_HOME": str(hf_home), "HF_HUB_CACHE": str(hf_home / "hub"),
+              "HF_DATASETS_CACHE": str(hf_home / "datasets"),
+              **{flag: "1" if offline else "0" for flag in OFFLINE_FLAGS}}
+    for var, val in pinned.items():
+        if os.environ.get(var, val) != val and not offline:
+            print(f"note: overriding {var}={os.environ[var]} with {val} for this run")
+        os.environ[var] = val
+    for var in LEGACY_CACHES:
+        if os.environ.pop(var, None) is not None and not offline:
+            print(f"note: ignoring {var} from the environment for this run")
 
 
 def select(assets, args):
@@ -109,12 +125,9 @@ def main() -> None:
     if args.hf_home is not None:
         hf_home = args.hf_home.expanduser().resolve()
         hf_home.mkdir(parents=True, exist_ok=True)
-        os.environ["HF_HOME"] = str(hf_home)
-        for var in CACHE_OVERRIDES + (() if args.verify_only else OFFLINE_FLAGS):
-            if os.environ.pop(var, None) is not None and not args.verify_only:
-                print(f"note: ignoring {var} from the environment for this run")
+        pin_hf_env(hf_home, offline=args.verify_only)
 
-    from posttrain_lab.hub_assets import hub_assets  # after HF_HOME is set: HF reads it at import
+    from posttrain_lab.hub_assets import hub_assets  # after pinning: HF reads the env at import
 
     assets = select(hub_assets(), args)
     if args.list:
