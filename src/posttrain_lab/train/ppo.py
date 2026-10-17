@@ -60,7 +60,7 @@ def main() -> None:
     def tokenize(ex):
         ids = tokenizer.apply_chat_template(
             ex["prompt"], add_generation_prompt=True, truncation=True,
-            max_length=max_prompt_tokens,
+            max_length=max_prompt_tokens, return_dict=False,  # transformers 5 defaults to a dict
         )
         return {"input_ids": ids}
 
