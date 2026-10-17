@@ -193,6 +193,8 @@ src/posttrain_lab/
   eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
 analysis/                 aggregate → frontier.csv; frontier, frontier_math, retention, diversity, pref_logps, diagnostics
 scripts/{helpful,math}/   per-stage launchers; run_all_{helpful,math}.sh; run_smoke.sh
+scripts/prefetch_assets.py  fill an HF_HOME for the offline cluster
+tests/                    python -m pytest tests/ (CPU; the download test skips without internet)
 ```
 
 ## Known risks / gotchas
