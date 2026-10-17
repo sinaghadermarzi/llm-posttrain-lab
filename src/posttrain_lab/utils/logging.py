@@ -99,28 +99,41 @@ def setup_tracking(cfg: DictConfig) -> None:
 _run_ids: dict[str, str | None] = {}
 
 
-def log_eval_metrics(cfg: DictConfig, run_dir: Path, step: int, metrics: dict[str, Any]) -> None:
-    """Log numeric eval results as eval/<key> at the checkpoint's training step
-    on the run's MLflow training run. Best effort: results are already on disk,
-    so a tracking outage warns instead of failing a long eval."""
-    if not tracking_enabled(cfg):
-        return
-    numeric = {
+def _numeric_metrics(metrics: dict[str, Any]) -> dict[str, float]:
+    """eval/<key> -> float, one level of nesting flattened (harness/<task>);
+    names sanitized to MLflow's charset (pass@1 -> pass_1)."""
+    flat: dict[str, Any] = {}
+    for k, v in metrics.items():
+        if isinstance(v, dict):
+            flat.update({f"{k}/{sub}": subv for sub, subv in v.items()})
+        else:
+            flat[k] = v
+    return {
         "eval/" + re.sub(r"[^0-9A-Za-z_\-\. :/]", "_", k): float(v)
-        for k, v in metrics.items()
+        for k, v in flat.items()
         if isinstance(v, (int, float)) and not isinstance(v, bool)
     }
+
+
+def log_eval_metrics(cfg: DictConfig, run_dir: Path, step: int, metrics: dict[str, Any]) -> bool:
+    """Log numeric eval results as eval/<key> at the checkpoint's training step
+    on the run's MLflow training run. Best effort: results are already on disk,
+    so a tracking outage warns instead of failing a long eval. Returns True once
+    MLflow has the metrics (or there was nothing to log), False to retry later."""
+    if not tracking_enabled(cfg):
+        return False
+    numeric = _numeric_metrics(metrics)
     if not numeric:
-        return
+        return True
     if step < 0:
         print(f"[mlflow] {run_dir.name}: no checkpoint step, not logging eval", file=sys.stderr)
-        return
+        return False
     try:
         from mlflow.entities import Metric
         from mlflow.tracking import MlflowClient
 
         client = MlflowClient(tracking_uri=_tracking_uri(cfg))
-        if run_dir.name not in _run_ids:
+        if not _run_ids.get(run_dir.name):
             exp = client.get_experiment_by_name(str(cfg.mlflow.experiment))
             runs = client.search_runs(
                 [exp.experiment_id],
@@ -132,11 +145,13 @@ def log_eval_metrics(cfg: DictConfig, run_dir: Path, step: int, metrics: dict[st
         run_id = _run_ids[run_dir.name]
         if run_id is None:
             print(f"[mlflow] no training run tagged run_dir={run_dir.name}, not logging eval", file=sys.stderr)
-            return
+            return False
         now = int(time.time() * 1000)
         client.log_batch(run_id, metrics=[Metric(k, v, now, step) for k, v in numeric.items()])
+        return True
     except Exception as e:  # noqa: BLE001 — tracking must not kill the eval
         print(f"[mlflow] eval logging failed for {run_dir.name} step {step}: {e}", file=sys.stderr)
+        return False
 
 
 def append_jsonl(path: str | Path, row: dict[str, Any]) -> None:
