@@ -16,7 +16,8 @@ lm-eval==0.4.12
 torch
 vllm==0.23.0
 deepspeed
-wandb
+# tracking client; keep its major version in line with the MLflow server's
+mlflow-skinny
 pandas
 matplotlib
 seaborn

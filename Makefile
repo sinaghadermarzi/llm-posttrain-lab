@@ -1,6 +1,10 @@
-.PHONY: smoke all \
+.PHONY: preflight smoke all \
 	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-grpo math-eval math-plots math-all
+
+# node readiness: GPUs, NCCL, libs, HF assets, MLflow (see notebooks/onboarding.ipynb)
+preflight:
+	python -m posttrain_lab.preflight
 
 smoke:
 	bash scripts/run_smoke.sh
