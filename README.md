@@ -76,8 +76,8 @@ flash-attn/DeepSpeed/vLLM, Hugging Face assets (offline cluster) and MLflow, one
 section each. The same checks run headless with `make preflight` or
 `python -m posttrain_lab.preflight gpu mlflow ...`.
 
-Tracking is MLflow (`report_to: mlflow`). Set `MLFLOW_TRACKING_URI` (and optionally
-`MLFLOW_PORT`) in `.env` or the pod env. Runs land in experiment
+Tracking is MLflow (`report_to: mlflow`). Set `MLFLOW_TRACKING_URI` in `.env` or the pod
+env, plus `MLFLOW_PORT` only if the server's non-standard port isn't already in the URI. Runs land in experiment
 `llm-posttrain-lab-<task>`, tagged with `arm`, `hyperparam`, `seed` and `run_dir`; eval
 metrics are attached to each training run as `eval/*` at the checkpoint's step.
 
