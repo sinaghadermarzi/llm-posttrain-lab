@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
 from posttrain_lab.config import seed_everything
-from posttrain_lab.utils.logging import setup_wandb
+from posttrain_lab.utils.logging import setup_tracking
 
 
 def parse_entry(default_yaml: str) -> tuple[str, list[str]]:
@@ -50,6 +50,6 @@ def model_kwargs(cfg: DictConfig) -> dict:
 
 def begin_run(cfg: DictConfig) -> None:
     seed_everything(int(cfg.seed))
-    setup_wandb(cfg)
+    setup_tracking(cfg)
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
     print(f"[train] stage={cfg.stage} run={cfg.run_name} out={cfg.output_dir}")

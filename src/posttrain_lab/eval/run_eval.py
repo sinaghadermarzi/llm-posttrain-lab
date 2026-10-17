@@ -38,6 +38,7 @@ from posttrain_lab.eval.passk import passk_metrics
 from posttrain_lab.eval.reward_score import score_samples
 from posttrain_lab.tasks.gsm8k import is_correct
 from posttrain_lab.utils.checkpoints import discover_all_checkpoints, list_checkpoints, run_arm, run_hyperparam
+from posttrain_lab.utils.logging import log_eval_metrics, tracking_enabled
 
 
 def _core_helpful(cfg, ckpt, ctx) -> dict:
@@ -126,6 +127,25 @@ def _atomic_write_row(path: Path, row: dict) -> None:
     os.replace(tmp, path)
 
 
+_ROW_META = {"run", "arm", "hyperparam", "checkpoint", "step"}
+
+
+def _sync_tracking(cfg, run_dir: Path, summary_path: Path, row: dict) -> None:
+    """Send MLflow any row metrics it hasn't received yet. A sidecar
+    (<ckpt>.mlflow.json, kept out of the row so aggregate.py never sees it)
+    records what was logged, so a tracking outage is retried on the next eval
+    run and rows evaluated before tracking existed are backfilled."""
+    if not tracking_enabled(cfg):
+        return
+    marker = summary_path.with_suffix(".mlflow.json")
+    logged = set(json.loads(marker.read_text())) if marker.exists() else set()
+    pending = {k: v for k, v in row.items() if k not in logged and k not in _ROW_META}
+    if pending and log_eval_metrics(cfg, run_dir, row["step"], pending):
+        tmp = marker.with_suffix(".tmp")
+        tmp.write_text(json.dumps(sorted(logged | set(pending))))
+        os.replace(tmp, marker)
+
+
 def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
     run_dir = ckpt.parent if ckpt.name.startswith("checkpoint-") else ckpt
     out_dir = Path(cfg.eval.out_dir) / run_dir.name
@@ -143,6 +163,7 @@ def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
     missing = [g for g in requested if any(key not in row for key in GROUPS[g][0])]
     if not missing:
         print(f"[eval] {summary_path} complete for {requested}, skipping")
+        _sync_tracking(cfg, run_dir, summary_path, row)
         return
     print(f"[eval] {ckpt} -> groups {missing}")
 
@@ -172,8 +193,10 @@ def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
         "is_final": ckpt == list_checkpoints(run_dir)[-1],
     }
     for group in missing:
-        row.update(GROUPS[group][1](cfg, ckpt, ctx))
+        metrics = GROUPS[group][1](cfg, ckpt, ctx)
+        row.update(metrics)
         _atomic_write_row(summary_path, row)  # progress survives a crash mid-checkpoint
+        _sync_tracking(cfg, run_dir, summary_path, row)
 
 
 def main() -> None:
