@@ -2,8 +2,9 @@
 model knew? Two groups:
 
   retention_ppl      perplexity on wikitext-2-raw-v1 test (general English the
-                     model was never post-trained on). Cheap: runs on every
-                     checkpoint. Rising PPL = the base distribution eroding.
+                     model was never post-trained on; eval.retention.dataset).
+                     Cheap: runs on every checkpoint. Rising PPL = the base
+                     distribution eroding.
   retention_harness  lm-eval benchmarks (hellaswag, arc_easy, arc_challenge by
                      default) — benchmark-grade evidence. eval.harness.which
                      selects coverage: 'all' checkpoints (default; user opted
@@ -25,9 +26,12 @@ def ppl_group(cfg, ckpt, ctx) -> dict:
     tokenizer = AutoTokenizer.from_pretrained(str(ckpt))
     model = AutoModelForCausalLM.from_pretrained(str(ckpt), torch_dtype=dtype).to(device).eval()
 
-    text = "\n\n".join(
-        row["text"] for row in load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    )
+    retention = cfg.eval.retention
+    if retention.get("data_files"):
+        rows = load_dataset("parquet", data_files=str(retention.data_files), split="train")
+    else:
+        rows = load_dataset(str(retention.dataset), str(retention.config), split=str(retention.split))
+    text = "\n\n".join(row["text"] for row in rows)
     ids = tokenizer(text, return_tensors="pt")["input_ids"][0][: int(cfg.eval.retention.max_tokens)]
 
     window = 1024

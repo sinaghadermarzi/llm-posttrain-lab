@@ -110,6 +110,57 @@ Overrides are OmegaConf dotlist args
 grids live in `configs/{helpful,math}/sweeps.yaml`. Disk: ~250 GB helpful,
 ~60 GB math.
 
+## Offline cluster (Hugging Face assets)
+
+The pipeline loads these from the Hub (`python scripts/prefetch_assets.py --list`):
+the models `Qwen/Qwen2.5-1.5B` (base), `Qwen/Qwen2.5-0.5B` (smoke) and
+`Skywork/Skywork-Reward-V2-Llama-3.1-8B` (judge, helpful eval), and the datasets
+`HuggingFaceH4/ultrafeedback_binarized`, `openai/gsm8k` [main],
+`Salesforce/wikitext` [wikitext-2-raw-v1] (retention PPL) plus lm-eval's
+`Rowan/hellaswag` and `allenai/ai2_arc` [ARC-Easy, ARC-Challenge]. Without
+internet there are two ways to provide them. Set the variables in the pod spec
+or in `.env` (template in `.env.example`; `HF_*` lines there are exported on
+`import posttrain_lab`, and the pod env wins).
+
+**A. Internal mirror / proxy.** Point every HF client at it; nothing else changes:
+
+```bash
+HF_ENDPOINT=https://hf-mirror.internal.example   # + HF_TOKEN if it needs one
+HF_HOME=/mnt/hf                                  # optional: cache on a PVC, survives pod restarts
+```
+
+**B. Pre-populated cache on a PVC.** On a machine *with* internet (or with
+`HF_ENDPOINT` set to a mirror), download everything into one directory; the
+script then re-runs itself offline to prove the copy is self-sufficient:
+
+```bash
+python scripts/prefetch_assets.py /data/hf_home              # all, ~22 GB (judge ~16 GB)
+python scripts/prefetch_assets.py /data/hf_home --smoke      # only what `make smoke` needs, ~2.5 GB
+python scripts/prefetch_assets.py /data/hf_home --skip judge # e.g. math track only
+make prefetch PREFETCH_DIR=/data/hf_home PREFETCH_ARGS=--smoke
+```
+
+Copy the directory to the PVC with symlinks intact (`rsync -a`, or
+`tar -C /data/hf_home -cf - . | kubectl exec -i <pod> -- tar -C /mnt/hf -xf -`),
+then on the cluster:
+
+```bash
+HF_HOME=/mnt/hf HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+```
+
+Both `hub/` (model snapshots, raw dataset files) and `datasets/` (prepared
+Arrow tables) must come along: offline, `datasets` resolves a Hub id only
+through the Arrow cache, so leave `HF_DATASETS_CACHE`/`HF_HUB_CACHE` unset (or
+pointing inside the copy). Models are loaded by repo id from the cache, so no
+config changes are needed; `model.base`, `eval.judge` and `dataset.id` also
+accept local paths. The retention PPL set can instead come from a local
+parquet file: `eval.retention.data_files=/mnt/data/wikitext-2-raw-v1-test.parquet`.
+
+Check either option with `make preflight` (or `python -m posttrain_lab.preflight hf`:
+cached / downloadable / missing per asset), and `python -m posttrain_lab.preflight
+hf_load` to actually load each one (tokenizer + config per model, every dataset
+split, lm-eval's task build) with the current env.
+
 ## Reading the figures (`results/<task>/figures/`)
 
 - **`frontier.png`** (helpful): judge reward (left) vs training-RM reward
@@ -142,6 +193,8 @@ src/posttrain_lab/
   eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
 analysis/                 aggregate → frontier.csv; frontier, frontier_math, retention, diversity, pref_logps, diagnostics
 scripts/{helpful,math}/   per-stage launchers; run_all_{helpful,math}.sh; run_smoke.sh
+scripts/prefetch_assets.py  fill an HF_HOME for the offline cluster
+tests/                    python -m pytest tests/ (CPU; the download test skips without internet)
 ```
 
 ## Known risks / gotchas
