@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from paths import default_root
+
 
 def load_rows(eval_root: Path) -> pd.DataFrame:
     rows = []
@@ -51,7 +53,7 @@ def baseline_stats(eval_root: Path) -> dict[str, tuple[float, float]]:
 
 
 def main() -> None:
-    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
+    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root())
     df = load_rows(results_root / "eval")
 
     # z-score the learned-reward columns against the pi_SFT baseline where they

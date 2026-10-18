@@ -37,12 +37,13 @@ echo "=== smoke helpful 8/9: eval re-run must skip (incremental-merge check)"
 python -m posttrain_lab.eval.run_eval | tee /dev/stderr | grep -q "skipping"
 
 echo "=== smoke helpful 9/9: aggregate + figures"
-python analysis/aggregate.py results/smoke/helpful
-python analysis/frontier_plot.py results/smoke/helpful
-python analysis/diagnostics.py results/smoke/helpful
-python analysis/diversity_plot.py results/smoke/helpful
-python analysis/retention_plot.py results/smoke/helpful
-python analysis/pref_logps_plot.py results/smoke/helpful
+ROOT=$(python -m posttrain_lab.config --results-root helpful)  # SMOKE=1 -> <RESULTS_DIR>/smoke/helpful
+python analysis/aggregate.py "$ROOT"
+python analysis/frontier_plot.py "$ROOT"
+python analysis/diagnostics.py "$ROOT"
+python analysis/diversity_plot.py "$ROOT"
+python analysis/retention_plot.py "$ROOT"
+python analysis/pref_logps_plot.py "$ROOT"
 
 echo "=== smoke math 0/6: data loaders + verifier sanity"
 python -m posttrain_lab.data task=math
@@ -63,10 +64,11 @@ echo "=== smoke math 5/6: eval all checkpoints, all metric groups"
 python -m posttrain_lab.eval.run_eval task=math
 
 echo "=== smoke math 6/6: aggregate + figures"
-python analysis/aggregate.py results/smoke/math
-python analysis/frontier_math.py results/smoke/math
-python analysis/diversity_plot.py results/smoke/math
-python analysis/retention_plot.py results/smoke/math
-python analysis/pref_logps_plot.py results/smoke/math
+ROOT=$(python -m posttrain_lab.config --results-root math)  # SMOKE=1 -> <RESULTS_DIR>/smoke/math
+python analysis/aggregate.py "$ROOT"
+python analysis/frontier_math.py "$ROOT"
+python analysis/diversity_plot.py "$ROOT"
+python analysis/retention_plot.py "$ROOT"
+python analysis/pref_logps_plot.py "$ROOT"
 
-echo "SMOKE OK — figures under results/smoke/{helpful,math}/figures/"
+echo "SMOKE OK — figures under $(dirname "$ROOT")/{helpful,math}/figures/"

@@ -18,13 +18,14 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from paths import default_root
 from frontier_plot import plot_panel
 from style import METHOD_COLORS, METHOD_LABELS, apply_style
 
 
 def main() -> None:
     apply_style()
-    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else "results/math")
+    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root("math"))
     df = pd.read_csv(results_root / "frontier.csv")
 
     passk_col = next(

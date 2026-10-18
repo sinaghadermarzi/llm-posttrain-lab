@@ -16,12 +16,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from paths import default_root
 from style import INK, METHOD_COLORS, apply_style
 
 
 def main() -> None:
     apply_style()
-    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
+    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root())
     df = pd.read_csv(results_root / "frontier.csv")
 
     panels = [
