@@ -19,3 +19,8 @@ pairs:
 eval:
   samples_per_prompt: 8
   max_new_tokens: 512
+  # Stage configs don't merge eval.yaml: keep these in sync with it (policy's
+  # own distribution, same as the RL arms and the eval).
+  temperature: 1.0
+  top_p: 1.0
+  use_vllm: true             # HF generate fallback if vllm unavailable
