@@ -29,11 +29,12 @@ echo "=== stage 4: evaluate all checkpoints"
 bash scripts/helpful/stage4_eval.sh
 
 echo "=== stage 5: aggregate + figures"
-python analysis/aggregate.py results/helpful
-python analysis/frontier_plot.py results/helpful
-python analysis/diagnostics.py results/helpful
-python analysis/diversity_plot.py results/helpful
-python analysis/retention_plot.py results/helpful
-python analysis/pref_logps_plot.py results/helpful
+ROOT=$(python -m posttrain_lab.config --results-root helpful)  # RESULTS_DIR-aware
+python analysis/aggregate.py "$ROOT"
+python analysis/frontier_plot.py "$ROOT"
+python analysis/diagnostics.py "$ROOT"
+python analysis/diversity_plot.py "$ROOT"
+python analysis/retention_plot.py "$ROOT"
+python analysis/pref_logps_plot.py "$ROOT"
 
-echo "ALL DONE — see results/helpful/figures/frontier.png"
+echo "ALL DONE — see $ROOT/figures/frontier.png"

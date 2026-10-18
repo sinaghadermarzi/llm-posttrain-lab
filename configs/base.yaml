@@ -2,7 +2,7 @@
 #   base.yaml -> tasks/<task>.yaml -> stage yaml -> smoke.yaml (--smoke) -> CLI dotlist
 seed: 17
 task: helpful
-results_root: results/${task}
+results_root: ${results_dir:}/${task}   # RESULTS_DIR (env or .env), default results/
 
 model:
   base: Qwen/Qwen2.5-1.5B          # escape hatch: Qwen/Qwen2.5-1.5B-Instruct (then skip stage 1)

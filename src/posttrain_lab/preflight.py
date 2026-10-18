@@ -4,7 +4,7 @@
     python -m posttrain_lab.preflight gpu mlflow       # just these
     python -m posttrain_lab.preflight --list           # names + descriptions
 
-From a notebook (see notebooks/preflight.ipynb):
+From a notebook (see notebooks/onboarding.ipynb):
 
     from posttrain_lab import preflight
     preflight.run("gpu")
@@ -74,7 +74,7 @@ def check_packages() -> Result:
 
 def check_system() -> Result:
     """CPU/RAM, /dev/shm (NCCL + dataloaders need it; pods default to 64MB),
-    and free disk for results and the HF cache."""
+    and free disk where RESULTS_DIR and HF_HOME point."""
     out: Result = [("INFO", f"host {socket.gethostname()}, {os.cpu_count()} CPUs")]
     try:
         ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
@@ -90,16 +90,21 @@ def check_system() -> Result:
     else:
         out.append(("INFO", "/dev/shm not present (not Linux?)"))
 
-    # README budget: ~250 GB helpful + ~60 GB math results, plus ~20 GB of models
-    cfg = load_config("helpful/stage1_sft_base.yaml", [])
-    targets = {"results": REPO_ROOT / Path(cfg.results_root).parts[0], "HF cache": _hf_home()}
-    for label, path in targets.items():
+    # README budget: ~250 GB helpful + ~60 GB math results, ~22 GB HF cache (with the judge)
+    from posttrain_lab.utils.dotenv import results_dir, results_dir_source
+
+    results = Path(results_dir())
+    results = results if results.is_absolute() else REPO_ROOT / results
+    out.append(("INFO", f"RESULTS_DIR -> {results} (from {results_dir_source()}; set it in .env to move results)"))
+    out.append(("INFO", f"HF_HOME -> {_hf_home()}"))
+    targets = {"results": (results, 310, "~310 GB for both tracks"), "HF cache": (_hf_home(), 25, "~22 GB")}
+    for label, (path, need, budget) in targets.items():
         probe = path
         while not probe.exists() and probe != probe.parent:
             probe = probe.parent
         free = shutil.disk_usage(probe).free / 2**30
-        level = "OK" if free >= 330 else "WARN"
-        out.append((level, f"{label} ({path}): {free:.0f} GB free (budget ~330 GB for both tracks)"))
+        level = "OK" if free >= need else "WARN"
+        out.append((level, f"{label} ({path}): {free:.0f} GB free (budget {budget})"))
     return out
 
 
@@ -280,65 +285,118 @@ def _hf_home() -> Path:
     return Path(constants.HF_HOME)
 
 
-def _hub_assets() -> list[tuple[str, str, str]]:
-    helpful = load_config("helpful/stage1_sft_base.yaml", [])
-    math = load_config("math/m1_sft_gold.yaml", [])
-    smoke = load_config("helpful/stage1_sft_base.yaml", ["--smoke"])
+def _hf_env() -> Result:
+    from huggingface_hub import constants
+
+    token = os.environ.get("HF_TOKEN") or Path(constants.HF_TOKEN_PATH).exists()
     return [
-        ("model", str(helpful.model.base), "base model (both tracks)"),
-        ("model", str(smoke.model.base), "smoke-test model"),
-        ("model", str(helpful.eval.judge), "held-out judge (helpful eval)"),
-        ("dataset", str(helpful.dataset.id), "helpful data"),
-        ("dataset", str(math.dataset.id), "math data"),
-        # hardcoded in eval/retention.py and lm-eval's task yamls
-        ("dataset", "Salesforce/wikitext", "retention PPL (loaded as 'wikitext')"),
-        ("dataset", "Rowan/hellaswag", "lm-eval hellaswag"),
-        ("dataset", "allenai/ai2_arc", "lm-eval arc_easy / arc_challenge"),
+        ("INFO", f"HF_HOME={constants.HF_HOME}  (hub: {constants.HF_HUB_CACHE}, "
+                 f"datasets: {os.environ.get('HF_DATASETS_CACHE', _hf_home() / 'datasets')})"),
+        ("INFO", f"HF_ENDPOINT={constants.ENDPOINT}  HF_HUB_OFFLINE={int(constants.HF_HUB_OFFLINE)}  "
+                 f"HF_DATASETS_OFFLINE={os.environ.get('HF_DATASETS_OFFLINE', '0')}  "
+                 f"token={'set' if token else 'none'}"),
     ]
+
+
+def hf_cache_report(assets) -> Result:
+    """Per asset: usable from the local cache, downloadable from HF_ENDPOINT, or neither."""
+    from huggingface_hub import HfApi, constants
+
+    from posttrain_lab.hub_assets import dataset_prepared, model_snapshot
+
+    offline = constants.HF_HUB_OFFLINE
+    out: Result = []
+    reachable = False
+    if not offline:
+        reachable, detail = _probe(constants.ENDPOINT)
+        out.append(("OK" if reachable else "INFO",
+                    f"{constants.ENDPOINT}: {'reachable' if reachable else 'unreachable'} ({detail})"))
+    api = HfApi()
+    all_cached = True
+    for a in assets:
+        label = f"{a.kind} {a.repo}" + (f" [{a.config}]" if a.config else "")
+        if Path(a.repo).exists():
+            out.append(("OK", f"{label}: local path — {a.why}"))
+            continue
+        if a.kind == "model":
+            path, problem = model_snapshot(a.repo)
+            if path and not problem:
+                out.append(("OK", f"{label}: in local cache — {a.why}"))
+                continue
+            gap = f"incomplete snapshot ({problem})" if path else "not cached"
+        else:
+            splits, _ = dataset_prepared(a.repo, a.config)
+            if splits:
+                out.append(("OK", f"{label}: in local cache (splits {', '.join(splits)}) — {a.why}"))
+                continue
+            gap = "not cached (no prepared Arrow cache in the datasets cache)"
+        all_cached = False
+        if reachable:
+            try:
+                (api.model_info if a.kind == "model" else api.dataset_info)(a.repo, timeout=10)
+                out.append(("OK", f"{label}: {gap}, downloadable — {a.why}"))
+            except Exception as e:  # noqa: BLE001
+                out.append(("FAIL", f"{label}: {gap} and endpoint refused ({type(e).__name__}) — {a.why}"))
+        else:
+            out.append(("FAIL", f"{label}: {gap} and no reachable endpoint — {a.why}"))
+    if all_cached and not offline and not reachable:
+        out.append(("WARN", "everything is cached but the endpoint is unreachable: set HF_HUB_OFFLINE=1 "
+                            "HF_DATASETS_OFFLINE=1 so loads don't wait on network timeouts"))
+    return out
 
 
 def check_hf() -> Result:
     """Every Hub model/dataset the pipeline loads: in the local cache, or
     downloadable from HF_ENDPOINT? Missing from both = that stage fails offline."""
-    from huggingface_hub import HfApi, constants, scan_cache_dir
+    from posttrain_lab.hub_assets import hub_assets
 
-    offline = constants.HF_HUB_OFFLINE
-    out: Result = [
-        ("INFO", f"HF_HOME={constants.HF_HOME}"),
-        ("INFO", f"HF_ENDPOINT={constants.ENDPOINT}  HF_HUB_OFFLINE={int(offline)}  "
-                 f"HF_DATASETS_OFFLINE={os.environ.get('HF_DATASETS_OFFLINE', '0')}  "
-                 f"token={'set' if os.environ.get('HF_TOKEN') or Path(constants.HF_TOKEN_PATH).exists() else 'none'}"),
-    ]
-    try:
-        cached = {(r.repo_type, r.repo_id) for r in scan_cache_dir().repos}
-    except Exception:  # noqa: BLE001 — no cache dir yet
-        cached = set()
-    ds_cache = Path(os.environ.get("HF_DATASETS_CACHE", _hf_home() / "datasets"))
+    return _hf_env() + hf_cache_report(hub_assets())
 
-    reachable = False
-    if not offline:
-        reachable, detail = _probe(constants.ENDPOINT)
-        out.append(("OK" if reachable else "INFO", f"{constants.ENDPOINT}: {'reachable' if reachable else 'unreachable'} ({detail})"))
-    api = HfApi()
-    for kind, repo, why in _hub_assets():
-        names = {repo, repo.split("/")[-1]}  # 'wikitext' is cached under its short name
-        in_cache = any((kind, name) in cached for name in names) or (
-            kind == "dataset" and any(any(ds_cache.glob(name.replace("/", "___") + "*")) for name in names)
-        )
-        if in_cache:
-            out.append(("OK", f"{kind} {repo}: in local cache — {why}"))
-            continue
-        if reachable:
-            try:
-                info = api.model_info if kind == "model" else api.dataset_info
-                info(repo, timeout=10)
-                out.append(("OK", f"{kind} {repo}: not cached, downloadable — {why}"))
-                continue
-            except Exception as e:  # noqa: BLE001
-                out.append(("FAIL", f"{kind} {repo}: not cached and endpoint refused ({type(e).__name__}) — {why}"))
-                continue
-        out.append(("FAIL", f"{kind} {repo}: not cached and no reachable endpoint — {why}"))
+
+def hf_load_report(assets) -> Result:
+    """Load each asset the way the pipeline does: config + tokenizer per model
+    (weights are only checked for presence), every split per dataset, and
+    lm-eval's own task build for the harness datasets."""
+    from datasets import load_dataset
+    from transformers import AutoConfig, AutoTokenizer
+
+    out: Result = []
+    task_manager = None
+    for a in assets:
+        label = f"{a.kind} {a.repo}" + (f" [{a.config}]" if a.config else "")
+        try:
+            if a.kind == "model":
+                cfg = AutoConfig.from_pretrained(a.repo)
+                AutoTokenizer.from_pretrained(a.repo)
+                detail = f"config ({cfg.model_type}) + tokenizer"
+            elif a.harness_task:
+                from lm_eval.tasks import TaskManager
+
+                task_manager = task_manager or TaskManager()
+                task = task_manager.load([a.harness_task])["tasks"][a.harness_task]
+                detail = f"lm-eval task built ({', '.join(f'{k}={len(v)}' for k, v in task.dataset.items())})"
+            else:
+                ds = load_dataset(a.repo, a.config)
+                detail = ", ".join(f"{k}={len(v)}" for k, v in ds.items())
+            out.append(("OK", f"{label}: loaded {detail}"))
+        except Exception as e:  # noqa: BLE001
+            out.append(("FAIL", f"{label}: {type(e).__name__}: {str(e).splitlines()[0][:200]}"))
+    ret = load_config("eval.yaml", []).eval.retention
+    if ret.get("data_files"):
+        try:
+            n = len(load_dataset("parquet", data_files=str(ret.data_files), split="train"))
+            out.append(("OK", f"retention data_files {ret.data_files}: loaded {n} rows"))
+        except Exception as e:  # noqa: BLE001
+            out.append(("FAIL", f"retention data_files {ret.data_files}: {type(e).__name__}: {e}"))
     return out
+
+
+def check_hf_load() -> Result:
+    """Actually load every Hub asset (model config + tokenizer, dataset splits,
+    lm-eval tasks) with the current env, e.g. HF_HUB_OFFLINE=1 (~1 min)."""
+    from posttrain_lab.hub_assets import hub_assets
+
+    return _hf_env() + hf_load_report(hub_assets())
 
 
 # ------------------------------------------------------------------ mlflow
@@ -409,7 +467,10 @@ CHECKS: dict[str, Callable[[], Result]] = {
     "hf": check_hf,
     "mlflow": check_mlflow,
 }
-EXTRA: dict[str, Callable[[], Result]] = {"vllm_generate": check_vllm_generate}  # opt-in: slow
+EXTRA: dict[str, Callable[[], Result]] = {  # opt-in: slow
+    "vllm_generate": check_vllm_generate,
+    "hf_load": check_hf_load,
+}
 
 
 def list_checks() -> None:

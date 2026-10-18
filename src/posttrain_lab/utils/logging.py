@@ -21,6 +21,7 @@ from omegaconf import DictConfig
 
 from posttrain_lab.config import CONFIG_DIR
 from posttrain_lab.utils.checkpoints import run_arm, run_hyperparam
+from posttrain_lab.utils.dotenv import read_dotenv as _read_dotenv
 
 
 def tracking_enabled(cfg: DictConfig) -> bool:
@@ -28,20 +29,6 @@ def tracking_enabled(cfg: DictConfig) -> bool:
     if report_to in (None, "none"):
         return False
     return "mlflow" in ([report_to] if isinstance(report_to, str) else list(report_to))
-
-
-def _read_dotenv(path: Path) -> dict[str, str]:
-    """Minimal KEY=VALUE parser (comments, blank lines, optional quotes)."""
-    if not path.exists():
-        return {}
-    out = {}
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, val = line.split("=", 1)
-        out[key.strip().removeprefix("export ").strip()] = val.strip().strip("'\"")
-    return out
 
 
 def _tracking_uri(cfg: DictConfig) -> str | None:

@@ -20,6 +20,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from paths import default_root
 from style import BLUE_RAMP, INK, METHOD_COLORS, apply_style
 
 
@@ -77,7 +78,7 @@ def kl_diagnostics(results_root: Path, out_dir: Path) -> None:
 
 def main() -> None:
     apply_style()
-    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
+    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root("helpful"))
     out_dir = results_root / "figures"
     out_dir.mkdir(parents=True, exist_ok=True)
     dpo_logp_trajectories(results_root, out_dir)
