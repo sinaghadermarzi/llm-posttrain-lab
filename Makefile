@@ -48,12 +48,12 @@ eval:
 	bash scripts/helpful/stage4_eval.sh
 
 plots:
-	python analysis/aggregate.py $(HELPFUL_RESULTS)
-	python analysis/frontier_plot.py $(HELPFUL_RESULTS)
-	python analysis/diagnostics.py $(HELPFUL_RESULTS)
-	python analysis/diversity_plot.py $(HELPFUL_RESULTS)
-	python analysis/retention_plot.py $(HELPFUL_RESULTS)
-	python analysis/pref_logps_plot.py $(HELPFUL_RESULTS)
+	python analysis/aggregate.py "$(HELPFUL_RESULTS)"
+	python analysis/frontier_plot.py "$(HELPFUL_RESULTS)"
+	python analysis/diagnostics.py "$(HELPFUL_RESULTS)"
+	python analysis/diversity_plot.py "$(HELPFUL_RESULTS)"
+	python analysis/retention_plot.py "$(HELPFUL_RESULTS)"
+	python analysis/pref_logps_plot.py "$(HELPFUL_RESULTS)"
 
 helpful-all:
 	bash scripts/run_all_helpful.sh
@@ -79,11 +79,11 @@ math-eval:
 	bash scripts/math/m4_eval.sh
 
 math-plots:
-	python analysis/aggregate.py $(MATH_RESULTS)
-	python analysis/frontier_math.py $(MATH_RESULTS)
-	python analysis/diversity_plot.py $(MATH_RESULTS)
-	python analysis/retention_plot.py $(MATH_RESULTS)
-	python analysis/pref_logps_plot.py $(MATH_RESULTS)
+	python analysis/aggregate.py "$(MATH_RESULTS)"
+	python analysis/frontier_math.py "$(MATH_RESULTS)"
+	python analysis/diversity_plot.py "$(MATH_RESULTS)"
+	python analysis/retention_plot.py "$(MATH_RESULTS)"
+	python analysis/pref_logps_plot.py "$(MATH_RESULTS)"
 
 math-all:
 	bash scripts/run_all_math.sh
