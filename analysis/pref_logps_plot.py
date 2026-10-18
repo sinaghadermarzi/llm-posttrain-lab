@@ -19,12 +19,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from paths import default_root
 from style import METHOD_COLORS, METHOD_LABELS, apply_style
 
 
 def main() -> None:
     apply_style()
-    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
+    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root())
     df = pd.read_csv(results_root / "frontier.csv")
     if "logp_chosen" not in df.columns:
         print("no pref_logps columns in frontier.csv — run eval with the pref_logps group first")

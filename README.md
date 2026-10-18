@@ -81,6 +81,20 @@ env, plus `MLFLOW_PORT` only if the server's non-standard port isn't already in 
 `llm-posttrain-lab-<task>`, tagged with `arm`, `hyperparam`, `seed` and `run_dir`; eval
 metrics are attached to each training run as `eval/*` at the checkpoint's step.
 
+Storage: results and checkpoints need ~310 GB for both tracks and the HF cache
+~22 GB, often more than the pod's home volume. Put both on a bigger volume in
+`.env` (or the pod env, which wins), using absolute paths:
+
+```bash
+RESULTS_DIR=/mnt/data/results   # default: results/ in the repo; a relative value is taken from the repo root
+HF_HOME=/mnt/data/hf            # default: ~/.cache/huggingface
+```
+
+Every stage, `make plots`/`make math-plots`, the `run_all_*`/`run_smoke` launchers
+and the analysis scripts' defaults follow `RESULTS_DIR` (runs land in
+`$RESULTS_DIR/<task>`, smoke in `$RESULTS_DIR/smoke/<task>`). `make preflight`'s
+`system` check prints both resolved paths and their free space.
+
 ```bash
 pip install -r requirements.txt && pip install -e .
 
@@ -108,7 +122,7 @@ after a crash and it continues. Per-stage targets:
 Overrides are OmegaConf dotlist args
 (`python -m posttrain_lab.train.dpo configs/math/m3_arm_dpo.yaml train.beta=0.2`);
 grids live in `configs/{helpful,math}/sweeps.yaml`. Disk: ~250 GB helpful,
-~60 GB math.
+~60 GB math, under `RESULTS_DIR` (see Storage above).
 
 ## Offline cluster (Hugging Face assets)
 

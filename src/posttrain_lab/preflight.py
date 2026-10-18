@@ -74,7 +74,7 @@ def check_packages() -> Result:
 
 def check_system() -> Result:
     """CPU/RAM, /dev/shm (NCCL + dataloaders need it; pods default to 64MB),
-    and free disk for results and the HF cache."""
+    and free disk where RESULTS_DIR and HF_HOME point."""
     out: Result = [("INFO", f"host {socket.gethostname()}, {os.cpu_count()} CPUs")]
     try:
         ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
@@ -90,16 +90,21 @@ def check_system() -> Result:
     else:
         out.append(("INFO", "/dev/shm not present (not Linux?)"))
 
-    # README budget: ~250 GB helpful + ~60 GB math results, plus ~20 GB of models
-    cfg = load_config("helpful/stage1_sft_base.yaml", [])
-    targets = {"results": REPO_ROOT / Path(cfg.results_root).parts[0], "HF cache": _hf_home()}
-    for label, path in targets.items():
+    # README budget: ~250 GB helpful + ~60 GB math results, ~22 GB HF cache (with the judge)
+    from posttrain_lab.utils.dotenv import results_dir, results_dir_source
+
+    results = Path(results_dir())
+    results = results if results.is_absolute() else REPO_ROOT / results
+    out.append(("INFO", f"RESULTS_DIR -> {results} (from {results_dir_source()}; set it in .env to move results)"))
+    out.append(("INFO", f"HF_HOME -> {_hf_home()}"))
+    targets = {"results": (results, 310, "~310 GB for both tracks"), "HF cache": (_hf_home(), 25, "~22 GB")}
+    for label, (path, need, budget) in targets.items():
         probe = path
         while not probe.exists() and probe != probe.parent:
             probe = probe.parent
         free = shutil.disk_usage(probe).free / 2**30
-        level = "OK" if free >= 330 else "WARN"
-        out.append((level, f"{label} ({path}): {free:.0f} GB free (budget ~330 GB for both tracks)"))
+        level = "OK" if free >= need else "WARN"
+        out.append((level, f"{label} ({path}): {free:.0f} GB free (budget {budget})"))
     return out
 
 

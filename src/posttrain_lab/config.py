@@ -22,7 +22,12 @@ from pathlib import Path
 
 from omegaconf import DictConfig, OmegaConf
 
+from posttrain_lab.utils.dotenv import results_dir
+
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "configs"
+
+# ${results_dir:} in base.yaml / smoke.yaml: RESULTS_DIR (env, else .env), default results
+OmegaConf.register_new_resolver("results_dir", results_dir, replace=True)
 
 
 def load_config(stage_yaml: str | Path, argv: list[str] | None = None) -> DictConfig:
@@ -103,15 +108,29 @@ def train_kwargs(cfg: DictConfig, config_cls) -> dict:
     return out
 
 
-def _sweep_cli() -> None:
-    """Print sweep override values for a task's stage, one per line (used by
-    scripts/): ``python -m posttrain_lab.config helpful dpo``."""
+def results_root(task: str) -> str:
+    """A task's resolved results_root (RESULTS_DIR, and smoke/ under SMOKE=1)."""
+    return str(load_config("eval.yaml", [f"task={task}"]).results_root)
+
+
+def _cli() -> None:
+    """Used by scripts/ and the Makefile:
+
+    python -m posttrain_lab.config helpful dpo          sweep override values, one per line
+    python -m posttrain_lab.config --results-root math  the task's results_root
+    """
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("task", choices=["helpful", "math"])
-    parser.add_argument("stage", choices=["dpo", "ppo", "grpo"])
+    parser.add_argument("stage", nargs="?", choices=["dpo", "ppo", "grpo"])
+    parser.add_argument("--results-root", action="store_true", help="print the task's results_root and exit")
     args = parser.parse_args()
+    if args.results_root:
+        print(results_root(args.task))
+        return
+    if args.stage is None:
+        parser.error("stage is required (or pass --results-root)")
     sweeps = OmegaConf.load(CONFIG_DIR / args.task / "sweeps.yaml")[args.stage]
     for key, values in sweeps.items():
         for value in values:
@@ -119,4 +138,4 @@ def _sweep_cli() -> None:
 
 
 if __name__ == "__main__":
-    _sweep_cli()
+    _cli()

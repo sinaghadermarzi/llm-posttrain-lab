@@ -20,6 +20,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from paths import default_root
 from style import INK, METHOD_COLORS, METHOD_LABELS, apply_style
 
 
@@ -54,7 +55,7 @@ def plot_panel(ax, df: pd.DataFrame, ycol: str, title: str) -> None:
 
 def main() -> None:
     apply_style()
-    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else "results")
+    results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root("helpful"))
     df = pd.read_csv(results_root / "frontier.csv")
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharex=True)
