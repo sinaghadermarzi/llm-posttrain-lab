@@ -5,6 +5,7 @@ targets and preflight's system check."""
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 PROBE = """
@@ -55,12 +56,15 @@ def test_unset_default_unchanged(repo) -> None:
 
 
 def test_make_plots_follow_results_dir(repo, tmp_path: Path) -> None:
-    big = tmp_path / "big"
-    repo.write_env(f"RESULTS_DIR={big}\n")
-    out = repo.run("make", "-n", "plots", "math-plots").stdout
-    assert f"analysis/aggregate.py {big}/helpful" in out
-    assert f"analysis/frontier_math.py {big}/math" in out
-    assert " results/" not in out
+    big = tmp_path / "big volume"  # a space must not split the argument
+    repo.write_env(f'RESULTS_DIR="{big}"\n')
+    commands = [shlex.split(line) for line in repo.run("make", "-n", "plots", "math-plots").stdout.splitlines()]
+    plots = [argv for argv in commands if argv[:1] == ["python"] and argv[1].startswith("analysis/")]
+    assert len(plots) == 11
+    for argv in plots:
+        assert len(argv) == 3, argv
+        assert argv[2] in (f"{big}/helpful", f"{big}/math"), argv
+    assert ["python", "analysis/frontier_math.py", f"{big}/math"] in plots
 
 
 def test_preflight_system_reports_results_dir(repo, tmp_path: Path) -> None:
