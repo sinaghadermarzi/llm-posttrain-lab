@@ -23,10 +23,11 @@ echo "=== math m4: evaluate all checkpoints"
 bash scripts/math/m4_eval.sh
 
 echo "=== math m5: aggregate + figures"
-python analysis/aggregate.py results/math
-python analysis/frontier_math.py results/math
-python analysis/diversity_plot.py results/math
-python analysis/retention_plot.py results/math
-python analysis/pref_logps_plot.py results/math
+ROOT=$(python -m posttrain_lab.config --results-root math)  # RESULTS_DIR-aware
+python analysis/aggregate.py "$ROOT"
+python analysis/frontier_math.py "$ROOT"
+python analysis/diversity_plot.py "$ROOT"
+python analysis/retention_plot.py "$ROOT"
+python analysis/pref_logps_plot.py "$ROOT"
 
-echo "MATH TRACK DONE — see results/math/figures/"
+echo "MATH TRACK DONE — see $ROOT/figures/"

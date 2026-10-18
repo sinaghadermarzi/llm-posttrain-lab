@@ -2,7 +2,7 @@
 # Exercises every stage interface end-to-end on a tiny model + tiny slices.
 # Target: full 6-stage pipeline in < 30 min on a single GPU.
 smoke: true
-results_root: results/smoke/${task}
+results_root: ${results_dir:}/smoke/${task}
 
 model:
   base: Qwen/Qwen2.5-0.5B
