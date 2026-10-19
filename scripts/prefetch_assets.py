@@ -79,9 +79,14 @@ or put HF_HUB_DISABLE_XET=1 in .env so training through the mirror gets it too."
 
 
 def xet_unsupported(exc: BaseException | None) -> bool:
-    """True if a download died on the endpoint's missing Xet token route."""
+    """True only if a download died on a 404 from the Xet token route, i.e. the
+    endpoint doesn't implement it. Auth errors, throttling or a 5xx on the same
+    route are real failures and must surface as such."""
     while exc is not None:
-        if "/xet-read-token/" in str(exc):
+        response = getattr(exc, "response", None)
+        request = getattr(response, "request", None) if response is not None else None
+        if (getattr(response, "status_code", None) == 404
+                and "/xet-read-token/" in str(getattr(request, "url", ""))):
             return True
         exc = exc.__cause__ or exc.__context__
     return False

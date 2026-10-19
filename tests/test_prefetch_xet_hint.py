@@ -18,10 +18,11 @@ spec.loader.exec_module(prefetch)
 
 def fail(assets):
     kind = {kind!r}
-    if kind == "xet":  # raised the way the real failure is: a 404 through hf_raise_for_status
+    if kind.startswith("xet"):  # raised the way the real failure is: through hf_raise_for_status
         import httpx
         from huggingface_hub.utils import hf_raise_for_status
-        hf_raise_for_status(httpx.Response(404, request=httpx.Request("GET", "{url}")))
+        status = int(kind.removeprefix("xet") or 404)
+        hf_raise_for_status(httpx.Response(status, request=httpx.Request("GET", "{url}")))
     raise ValueError("something else broke")
 
 prefetch.fetch = fail
@@ -48,6 +49,15 @@ def test_no_hint_when_xet_already_disabled(repo, tmp_path: Path) -> None:
     run = _run(repo, tmp_path, "xet", HF_HUB_DISABLE_XET="1")
     assert run.returncode != 0
     assert "Traceback" in run.stderr and "HfHubHTTPError" in run.stderr
+    assert "does not serve the Hub's Xet token API" not in run.stderr
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
+def test_non_404_on_the_token_route_propagates(repo, tmp_path: Path, status: int) -> None:
+    """Auth, throttling or server errors are real failures, not a missing route."""
+    run = _run(repo, tmp_path, f"xet{status}")
+    assert run.returncode != 0
+    assert "Traceback" in run.stderr and str(status) in run.stderr
     assert "does not serve the Hub's Xet token API" not in run.stderr
 
 
