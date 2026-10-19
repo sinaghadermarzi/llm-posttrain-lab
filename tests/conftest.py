@@ -14,7 +14,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # anything that would leak the caller's setup into the copy
 LEAKY_VARS = ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_DATASETS_CACHE", "TRANSFORMERS_CACHE",
-              "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE", "TRANSFORMERS_OFFLINE", "RESULTS_DIR", "SMOKE", "PYTHONPATH")
+              "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_HUB_DISABLE_XET", "HF_ENDPOINT",
+              "RESULTS_DIR", "SMOKE", "PYTHONPATH")
 
 
 class RepoCopy:

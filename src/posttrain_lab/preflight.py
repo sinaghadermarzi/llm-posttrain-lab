@@ -294,7 +294,7 @@ def _hf_env() -> Result:
                  f"datasets: {os.environ.get('HF_DATASETS_CACHE', _hf_home() / 'datasets')})"),
         ("INFO", f"HF_ENDPOINT={constants.ENDPOINT}  HF_HUB_OFFLINE={int(constants.HF_HUB_OFFLINE)}  "
                  f"HF_DATASETS_OFFLINE={os.environ.get('HF_DATASETS_OFFLINE', '0')}  "
-                 f"token={'set' if token else 'none'}"),
+                 f"HF_HUB_DISABLE_XET={int(constants.HF_HUB_DISABLE_XET)}  token={'set' if token else 'none'}"),
     ]
 
 
