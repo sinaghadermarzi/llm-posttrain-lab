@@ -140,8 +140,16 @@ or in `.env` (template in `.env.example`; `HF_*` lines there are exported on
 
 ```bash
 HF_ENDPOINT=https://hf-mirror.internal.example   # + HF_TOKEN if it needs one
+HF_HUB_DISABLE_XET=1                             # Artifactory / Nexus HF remotes (see below)
 HF_HOME=/mnt/hf                                  # optional: cache on a PVC, survives pod restarts
 ```
+
+Hub repos store large files in Xet, and huggingface_hub downloads those
+through a Hub-only token API (`/api/models/<repo>/xet-read-token/...`) that
+Artifactory and Nexus Hugging Face remotes don't implement. They answer 404,
+and the download dies. `HF_HUB_DISABLE_XET=1` makes the client fetch the same
+files over plain HTTP through the mirror. `prefetch_assets.py` prints this hint
+when it hits that 404.
 
 **B. Pre-populated cache on a PVC.** On a machine *with* internet (or with
 `HF_ENDPOINT` set to a mirror), download everything into one directory; the

@@ -66,11 +66,38 @@ def select(assets, args):
             if a.name in wanted and a.name not in skipped and (a.smoke or not args.smoke)]
 
 
+XET_HINT = """
+error: {error}
+
+{endpoint} does not serve the Hub's Xet token API (.../xet-read-token/... -> 404);
+Artifactory and Nexus Hugging Face remotes don't. Download over plain HTTP instead
+(files that already finished are skipped):
+
+    HF_HUB_DISABLE_XET=1 python {cmd}
+
+or put HF_HUB_DISABLE_XET=1 in .env so training through the mirror gets it too."""
+
+
+def xet_unsupported(exc: BaseException | None) -> bool:
+    """True only if a download died on a 404 from the Xet token route, i.e. the
+    endpoint doesn't implement it. Auth errors, throttling or a 5xx on the same
+    route are real failures and must surface as such."""
+    while exc is not None:
+        response = getattr(exc, "response", None)
+        request = getattr(response, "request", None) if response is not None else None
+        if (getattr(response, "status_code", None) == 404
+                and "/xet-read-token/" in str(getattr(request, "url", ""))):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 def fetch(assets) -> None:
     from datasets import load_dataset
     from huggingface_hub import constants, snapshot_download
 
-    print(f"HF_HOME={constants.HF_HOME}  HF_ENDPOINT={constants.ENDPOINT}\n")
+    print(f"HF_HOME={constants.HF_HOME}  HF_ENDPOINT={constants.ENDPOINT}  "
+          f"HF_HUB_DISABLE_XET={int(constants.HF_HUB_DISABLE_XET)}\n")
     task_manager = None
     for a in assets:
         label = f"{a.kind} {a.repo}" + (f" [{a.config}]" if a.config else "")
@@ -138,7 +165,16 @@ def main() -> None:
     if args.verify_only:
         sys.exit(0 if verify(assets) else 1)
 
-    fetch(assets)
+    try:
+        fetch(assets)
+    except Exception as e:  # noqa: BLE001
+        from huggingface_hub import constants
+
+        if constants.HF_HUB_DISABLE_XET or not xet_unsupported(e):
+            raise
+        line = str(e).splitlines()[0]
+        sys.exit(XET_HINT.format(error=f"{type(e).__name__}: {line}", endpoint=constants.ENDPOINT,
+                                 cmd=" ".join(sys.argv)))
     print(f"\n{hf_home}: {du(hf_home):.1f} GB")
     if args.no_verify:
         return
