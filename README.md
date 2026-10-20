@@ -146,14 +146,17 @@ run dirs, the logs and the process table, and prints for each track:
 - stage checks: m2 pair yield (prompts sampled vs the split, train/test
   pairs), the RM accuracy gate, GRPO zero-variance groups and clipped
   completions, DPO preference accuracy, eval coverage per metric group and
-  what each eval shard is on
+  what each eval shard is on; figures count as done only when every plot the
+  launcher makes exists and is newer than `frontier.csv` (itself newer than
+  every eval row)
 - GPUs now, plus the `gpu_util.csv` history (mean utilization, idle share)
 - errors found in the logs, a resume command when a track has stopped, and
   an **attention** list of everything that looks wrong
 
 It is read-only and quick (no torch import). `--json` prints the same report
-as JSON, `--smoke` shows the smoke tree, `--log PATH` points at a `run_all`
-log with a different name. Re-running `make <task>-all` after a stop skips
+as JSON, `--smoke` shows the smoke tree against exactly what `run_smoke.sh`
+runs, `--log PATH` points at a launcher log with a different name (each track
+reads only its own `=== ` headers from it). Re-running `make <task>-all` after a stop skips
 finished runs; the report's `resume` line gives the exact command.
 
 ## Offline cluster (Hugging Face assets)

@@ -93,6 +93,19 @@ TRACKS: dict[str, dict] = {
     },
 }
 
+# what each analysis script writes under <results_root>
+ANALYSIS_OUTPUTS = {
+    "aggregate.py": ["frontier.csv"],
+    "frontier_plot.py": ["figures/frontier.png", "figures/frontier.pdf"],
+    "frontier_math.py": ["figures/frontier_math.png", "figures/frontier_math.pdf"],
+    "diagnostics.py": ["figures/dpo_logps.png", "figures/diagnostics.png"],
+    "diversity_plot.py": ["figures/diversity.png"],
+    "retention_plot.py": ["figures/retention.png"],
+    "pref_logps_plot.py": ["figures/pref_logps.png"],
+}
+# the '=== ' headers a track's launcher echoes (run_all.sh logs carry both tracks)
+HEADER_PREFIX = {"math": "=== math ", "helpful": "=== stage "}
+
 # training metrics worth showing per trainer, in display order (TRL 1.7 names)
 METRICS = {
     "sft": ["loss", "mean_token_accuracy", "grad_norm", "learning_rate"],
@@ -232,6 +245,37 @@ def checkpoints(run_dir: Path) -> list[Path]:
     return sorted((p for p in run_dir.glob("checkpoint-*") if p.is_dir()), key=ckpt_step)
 
 
+def launcher_plan(task: str, smoke: bool) -> dict:
+    """What the track's launcher runs, read from the script so status follows it:
+    {"prefix": its '=== ' header prefix, "analysis": [analysis/*.py it calls],
+    "steps": [(header, stage yaml, overrides)]}. Only run_smoke.sh calls
+    python -m directly (one sweep value per arm, no math SFT arm), so steps is
+    filled in smoke mode; full runs take their runs from TRACKS + sweeps.yaml."""
+    script = REPO_ROOT / "scripts" / ("run_smoke.sh" if smoke else TRACKS[task]["driver"])
+    prefix = f"=== smoke {task} " if smoke else HEADER_PREFIX[task]
+    plan: dict = {"prefix": prefix, "analysis": [], "steps": []}
+    try:
+        lines = script.read_text().splitlines()
+    except OSError:
+        return plan
+    header = None
+    for raw in lines:
+        line = raw.strip()
+        m = re.match(r'echo "(=== [^"]*)"', line)
+        if m:
+            header = m[1] if m[1].startswith(prefix) else None
+            continue
+        if header is None:
+            continue
+        m = re.match(r"python -m posttrain_lab\.\S+\s+configs/(\S+\.ya?ml)((?:\s+[\w.]+=\S+)*)", line)
+        if m:
+            plan["steps"].append((header, m[1], m[2].split()))
+        m = re.match(r"python analysis/(\w+\.py)", line)
+        if m and m[1] not in plan["analysis"]:
+            plan["analysis"].append(m[1])
+    return plan
+
+
 def log_name(template: str, override: str = "", shard: int = 0) -> str:
     """The name scripts/*/m3b_*.sh gives a sweep run's log: ${ov//[.=\\/]/_}."""
     return template.format(ov=re.sub(r"[.=/]", "_", override), i=shard)
@@ -256,13 +300,16 @@ def log_lines(text: str) -> list[str]:
     return [ln for ln in text.replace("\r", "\n").split("\n") if ln.strip()]
 
 
-def last_section(text: str) -> tuple[str | None, str]:
-    """(last '=== ...' stage header, the log after it) of a run_all_*.sh log."""
+def last_section(text: str, prefix: str = "=== ") -> tuple[str | None, str]:
+    """(the last stage header starting with prefix, the log after it up to the
+    next '=== ' header) of a launcher log. (None, "") if no such header: the
+    log is not this track's (run_all.sh logs carry both tracks' headers)."""
     lines = text.split("\n")
     for i in range(len(lines) - 1, -1, -1):
-        if lines[i].startswith("=== "):
-            return lines[i].strip(), "\n".join(lines[i + 1:])
-    return None, text
+        if lines[i].startswith(prefix):
+            end = next((j for j in range(i + 1, len(lines)) if lines[j].startswith("=== ")), len(lines))
+            return lines[i].strip(), "\n".join(lines[i + 1:end])
+    return None, ""
 
 
 def last_progress(lines: list[str], label: str | None = "") -> dict | None:
@@ -378,6 +425,34 @@ def _proc_environ(pid: int) -> dict[str, str]:
     return env
 
 
+def _proc_cwd(pid: int) -> str | None:
+    """A process's working directory (/proc on Linux, lsof elsewhere)."""
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        pass
+    if not Path("/proc").is_dir() and shutil.which("lsof"):
+        try:
+            out = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True,
+                                 text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return next((ln[1:] for ln in out.splitlines() if ln.startswith("n")), None)
+    return None
+
+
+def in_this_repo(pid: int) -> bool:
+    """Launchers cd to the repo root, so their jobs run there; this keeps another
+    checkout's runs (or tests) out of the report. Unknown cwd counts as ours."""
+    cwd = _proc_cwd(pid)
+    if cwd is None:
+        return True
+    try:
+        return Path(cwd).resolve() == REPO_ROOT.resolve()
+    except OSError:
+        return True
+
+
 def _proc_stdout(pid: int) -> str | None:
     try:
         target = os.readlink(f"/proc/{pid}/fd/1")
@@ -411,7 +486,8 @@ def find_jobs(procs: list[dict]) -> list[Job]:
     jobs: dict[tuple, Job] = {}
     for p in procs:
         m = JOB_RE.search(p["args"])
-        if not m:
+        exe = Path(p["args"].split()[0]).name if p["args"].split() else ""
+        if not m or not re.match(r"(python[\d.]*|accelerate|torchrun)$", exe) or not in_this_repo(p["pid"]):
             continue
         args = m[2].split()
         key = (m[1], tuple(args))
@@ -435,8 +511,10 @@ def find_jobs(procs: list[dict]) -> list[Job]:
 def find_drivers(procs: list[dict]) -> list[dict]:
     out = []
     for p in procs:
-        m = re.search(r"(run_all(?:_\w+)?\.sh|run_smoke\.sh)", p["args"])
-        if m and "grep" not in p["args"]:
+        # `bash scripts/run_all_math.sh` (as make and the docs run them), not any
+        # command line that merely mentions the script
+        m = re.match(r"(?:\S*/)?(?:ba)?sh\s+(?:\S*/)?(run_all(?:_\w+)?\.sh|run_smoke\.sh)\b", p["args"])
+        if m and in_this_repo(p["pid"]):
             out.append({**p, "script": m[1], "log": _proc_stdout(p["pid"])})
     return out
 
@@ -716,6 +794,8 @@ def pairs_checks(run: Run, cfg, eval_cfg) -> dict | None:
         expected = min(expected, int(cap))
     if expected and stats.get("prompts", 0) < expected:
         run.warnings.append(f"sampled {stats.get('prompts')} of {expected} {cfg.data.split} prompts")
+    if os.environ.get("SMOKE") == "1":
+        return stats  # 0.5B, 10 steps, 64 tokens: tiny pair counts are expected
     if stats.get("train_pairs", 0) < 2000:
         run.warnings.append(f"only {stats.get('train_pairs')} DPO training pairs: the DPO arm will be weak")
     want = int(eval_cfg.eval.get("pref_logps", {}).get("num_pairs", 0) or 0)
@@ -804,46 +884,69 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
             "per_run": per_run, "shards": shards, "failed_shards": stopped}
 
 
-def figures_state(eval_cfg) -> dict:
+def figures_state(eval_cfg, analysis: list[str]) -> dict:
+    """The stage is done only when every output of the launcher's analysis
+    scripts exists, frontier.csv is newer than every eval row, and every
+    figure is newer than frontier.csv."""
     root = Path(str(eval_cfg.results_root))
-    figs = sorted(p.name for p in (root / "figures").glob("*") if p.suffix in (".png", ".pdf")) \
-        if (root / "figures").exists() else []
-    csv_path = root / "frontier.csv"
-    return {"figures": figs, "frontier_csv": str(csv_path) if csv_path.exists() else None,
-            "frontier_mtime": csv_path.stat().st_mtime if csv_path.exists() else None}
+    expected = [o for script in analysis for o in ANALYSIS_OUTPUTS.get(script, [])]
+    mtime = {o: (root / o).stat().st_mtime for o in expected if (root / o).exists()}
+    rows = [p.stat().st_mtime for p in (root / "eval").glob("*/*.jsonl") if not p.name.endswith(".samples.jsonl")] \
+        if (root / "eval").exists() else []
+    csv_t = mtime.get("frontier.csv")
+    stale = []
+    if csv_t is not None and rows and max(rows) > csv_t:
+        stale.append("frontier.csv")
+    if csv_t is not None:
+        stale += [o for o, t in mtime.items() if o != "frontier.csv" and t < csv_t]
+    missing = [o for o in expected if o not in mtime]
+    figs = sorted(Path(o).name for o in mtime if o.startswith("figures/"))
+    return {"expected": expected, "figures": figs, "missing": missing, "stale": stale,
+            "frontier_csv": str(root / "frontier.csv") if csv_t is not None else None,
+            "frontier_mtime": csv_t}
 
 
 def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict[str, Job],
                 log_override: str | None) -> dict:
     spec = TRACKS[task]
+    smoke = os.environ.get("SMOKE") == "1"
+    plan = launcher_plan(task, smoke)
     eval_cfg = load_config("eval.yaml", [f"task={task}"])
     root = Path(str(eval_cfg.results_root))
 
-    drivers = [d for d in find_drivers(procs) if d["script"] in (spec["driver"], "run_all.sh", "run_smoke.sh")]
+    scripts = ("run_smoke.sh",) if smoke else (spec["driver"], "run_all.sh")
+    drivers = [d for d in find_drivers(procs) if d["script"] in scripts]
     driver = drivers[0] if drivers else None
-    driver_log = None
-    for candidate in [log_override, driver and driver.get("log")] + [str(REPO_ROOT / n) for n in spec["logs"]]:
-        if candidate and Path(candidate).exists():
-            driver_log = Path(candidate)
-            break
-    header, section_lines, driver_errors = None, None, None
-    if driver_log:
-        text = tail_text(driver_log)
-        header, section = last_section(text)
+    names = ["smoke.log", "nohup.out"] if smoke else spec["logs"]
+    driver_log, header, section_lines, driver_errors = None, None, None, None
+    for candidate in [log_override, driver and driver.get("log")] + [str(REPO_ROOT / n) for n in names]:
+        if not candidate or not Path(candidate).exists():
+            continue
+        head, section = last_section(tail_text(Path(candidate)), plan["prefix"])
+        if head is None:
+            continue  # no header of this track: another track's log
+        driver_log, header = Path(candidate), head
         section_lines = log_lines(section)
         driver_errors = summarize_errors(section_lines)
+        break
 
     stages = []
     for stage in spec["stages"]:
         entry: dict = {"key": stage.key, "title": stage.title, "kind": stage.kind, "gpus": stage.gpus, "runs": []}
         if stage.kind in ("train", "pairs", "rm"):
-            values = [None]
-            if stage.sweep:
+            if smoke:  # exactly what run_smoke.sh runs
+                steps = [st for st in plan["steps"] if st[1] == stage.yaml]
+                if not steps:
+                    continue
+                values = [" ".join(st[2]) or None for st in steps]
+            elif stage.sweep:
                 sweeps = OmegaConf.load(CONFIG_DIR / task / "sweeps.yaml")[stage.sweep]
                 values = [f"{k}={v}" for k, vs in sweeps.items() for v in vs]
+            else:
+                values = [None]
             for ov in values:
-                cfg = load_config(stage.yaml, [ov] if ov else [])
-                section = section_lines if header_names(header, stage) else None
+                cfg = load_config(stage.yaml, ov.split() if ov else [])
+                section = section_lines if header_names(header, stage, plan, smoke) else None
                 run = resolve_run(stage, cfg, ov, jobs_by_dir, section, driver_log)
                 if stage.kind == "pairs":
                     entry["pairs"] = pairs_checks(run, cfg, eval_cfg)
@@ -866,9 +969,14 @@ def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict
             else:
                 entry["state"] = "pending"
         else:
-            fig = figures_state(eval_cfg)
+            fig = figures_state(eval_cfg, plan["analysis"])
             entry["figures"] = fig
-            entry["state"] = "done" if fig["figures"] else "pending"
+            if fig["expected"] and not fig["missing"] and not fig["stale"]:
+                entry["state"] = "done"
+            elif len(fig["missing"]) < len(fig["expected"]):
+                entry["state"] = "stopped"   # some outputs, but missing or stale ones
+            else:
+                entry["state"] = "pending"
         stages.append(entry)
 
     current = next((s for s in stages if s["state"] == "running"), None)
@@ -880,9 +988,15 @@ def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict
     }
 
 
-def header_names(header: str | None, stage: Stage) -> bool:
-    """Does a run_all '=== math m3a: ...' / '=== stage 3a: ...' header name this stage?"""
-    return bool(header) and re.search(rf"(?:math|stage)\s+{re.escape(stage.key)}\b", header) is not None
+def header_names(header: str | None, stage: Stage, plan: dict, smoke: bool) -> bool:
+    """Does the launcher's last header belong to this stage? run_all: '=== math
+    m3a: ...' / '=== stage 3a: ...'; smoke: the header run_smoke.sh echoes
+    before this stage's command."""
+    if not header:
+        return False
+    if smoke:
+        return any(h == header for h, yaml, _ in plan["steps"] if yaml == stage.yaml)
+    return re.search(rf"(?:math|stage)\s+{re.escape(stage.key)}\b", header) is not None
 
 
 def _rollup(states: list[str]) -> str:
@@ -906,7 +1020,8 @@ def collect(tasks: list[str], log_override: str | None = None) -> dict:
         out = job_output_dir(job)
         if out:
             jobs_by_dir[out] = job
-    tracks = [track_state(t, procs, jobs, jobs_by_dir, log_override if len(tasks) == 1 else None) for t in tasks]
+    # --log goes to every track; each reads only its own '=== ' headers from it
+    tracks = [track_state(t, procs, jobs, jobs_by_dir, log_override) for t in tasks]
     res = results_dir()
     try:
         usage = shutil.disk_usage(res if Path(res).exists() else REPO_ROOT)
@@ -954,6 +1069,11 @@ def attention(report: dict, jobs: list[Job]) -> list[str]:
                 elif run.state == "stopped" and not track["driver"]:
                     items.append(f"{t} {stage['key']} {run.name} stopped mid-run (no DONE marker); re-running the "
                                  "track restarts it")
+            fig = stage.get("figures")
+            if fig and stage["state"] == "stopped":
+                gaps = [f"missing {', '.join(fig['missing'])}"] if fig["missing"] else []
+                gaps += [f"stale {', '.join(fig['stale'])}"] if fig["stale"] else []
+                items.append(f"{t} {stage['key']} figures incomplete: {'; '.join(gaps)}")
             ev = stage.get("eval")
             if ev:
                 for sh in ev["failed_shards"]:
@@ -1095,6 +1215,10 @@ def render(report: dict, color: bool) -> str:
                 fig = stage["figures"]
                 if fig["figures"]:
                     L.append(f"        {len(fig['figures'])} figures: {', '.join(fig['figures'])}")
+                if fig["missing"] and stage["state"] != "pending":
+                    L.append(p(f"        missing: {', '.join(fig['missing'])}", "33"))
+                if fig["stale"]:
+                    L.append(p(f"        older than their inputs (re-run the plots): {', '.join(fig['stale'])}", "33"))
                 if fig["frontier_csv"]:
                     L.append(f"        frontier.csv written {fmt_time(fig['frontier_mtime'])}")
         reported = any(r.errors for s in track["stages"] for r in s["runs"])
