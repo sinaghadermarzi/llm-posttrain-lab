@@ -428,3 +428,58 @@ def test_log_flag_applies_with_all_tracks(repo, tmp_path: Path) -> None:
     arm = [s for s in math["stages"] if s["key"] == "m3a"][0]["runs"][0]
     assert arm["state"] == "failed" and "OutOfMemoryError" in arm["errors"]["last_exception"]
     assert helpful["driver_log"] is None
+
+
+# ---------------------------------------------------------------------------
+# generation that never stops (the first full math run)
+
+
+def test_health_flags_generation_that_never_stops() -> None:
+    run = status.Run(name="grpo_beta0.04_seed17", override=None, output_dir="x", step=934, max_steps=934,
+                     metrics={"completions/clipped_ratio": 1.0, "completions/mean_length": 320.0})
+    status.health(run, "grpo")
+    assert run.warnings == ["100% of completions hit max_completion_length: generation is not stopping at end of "
+                            "turn (check: python -m posttrain_lab.utils.chat RUN_DIR)"]
+    run = status.Run(name="g", override=None, output_dir="x", metrics={"completions/clipped_ratio": 0.6})
+    status.health(run, "grpo")
+    assert run.warnings == ["60% of completions hit max_completion_length"]
+
+
+def test_health_flags_a_finished_dpo_run_that_did_not_learn() -> None:
+    """Finished runs have no progress bar; the check uses trainer_state's step."""
+    run = status.Run(name="dpo_beta0.1_seed17", override=None, output_dir="x", step=147, max_steps=147,
+                     metrics={"loss": 0.6936, "rewards/accuracies": 0.30})
+    status.health(run, "dpo")
+    text = " | ".join(run.warnings)
+    assert "rewards/accuracies 0.3 at 100%" in text and "still ~ln 2" in text
+
+
+def test_stop_config_problem(tmp_path: Path) -> None:
+    template = "{% for m in messages %}<|im_start|>{{ m['content'] }}<|im_end|>{% endfor %}"
+    (tmp_path / "tokenizer_config.json").write_text(json.dumps({"eos_token": "<|endoftext|>", "chat_template": template}))
+    assert "never appears in its chat template" in status.stop_config_problem(tmp_path)
+    (tmp_path / "tokenizer_config.json").write_text(json.dumps({"eos_token": "<|im_end|>"}))
+    (tmp_path / "chat_template.jinja").write_text(template)   # transformers 5 saves it next to the config
+    assert status.stop_config_problem(tmp_path) is None
+
+
+def test_unfinished_share(tmp_path: Path) -> None:
+    path = tmp_path / "checkpoint-5.samples.jsonl"
+    path.write_text("".join(json.dumps({"response": "r", "finished": i < 1}) + "\n" for i in range(4)))
+    assert status.unfinished_share(path) == pytest.approx(0.75)
+    path.write_text(json.dumps({"response": "r"}) + "\n")   # written before generation recorded it
+    assert status.unfinished_share(path) is None
+
+
+def test_report_flags_runs_that_cannot_stop(repo, tmp_path: Path) -> None:
+    _, env = _fake_run(repo, tmp_path)
+    base = tmp_path / "results" / "math" / "runs" / "sft-base_seed17"
+    (base / "tokenizer_config.json").write_text(json.dumps({"eos_token": "<|endoftext|>",
+                                                            "chat_template": "<|im_start|>{{ x }}<|im_end|>"}))
+    samples = tmp_path / "results" / "math" / "eval" / "sft-base_seed17" / "checkpoint-72.samples.jsonl"
+    samples.write_text("".join(json.dumps({"response": "r", "finished": False}) + "\n" for _ in range(8)))
+    run = repo.python("-m", "posttrain_lab.status", "math", "--json", check=False, **env)
+    assert run.returncode == 0, run.stderr[-3000:]
+    attention = "\n".join(json.loads(run.stdout)["attention"])
+    assert "sft-base_seed17: saved tokenizer's eos '<|endoftext|>' never appears in its chat template" in attention
+    assert "most samples of sft-base_seed17 hit max_new_tokens" in attention

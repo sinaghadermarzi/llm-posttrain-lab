@@ -24,6 +24,8 @@ python -m posttrain_lab.data
 
 echo "=== smoke helpful 1/9: SFT base (pi_SFT)"
 python -m posttrain_lab.train.sft configs/helpful/stage1_sft_base.yaml
+# generation must stop at the chat template's end of turn (utils/chat.py)
+python -m posttrain_lab.utils.chat "$(python -m posttrain_lab.config --results-root helpful)/runs/sft-base_seed17"
 
 echo "=== smoke helpful 2/9: reward model"
 python -m posttrain_lab.train.rm configs/helpful/stage2_rm.yaml
@@ -48,6 +50,7 @@ python -m posttrain_lab.eval.run_eval | tee /dev/stderr | grep -q "skipping"
 
 echo "=== smoke helpful 9/9: aggregate + figures"
 ROOT=$(python -m posttrain_lab.config --results-root helpful)  # SMOKE=1 -> <RESULTS_DIR>/smoke/helpful
+python -m posttrain_lab.utils.chat "$ROOT"/runs/*/   # every saved run stops at end of turn
 python analysis/aggregate.py "$ROOT"
 python analysis/frontier_plot.py "$ROOT"
 python analysis/diagnostics.py "$ROOT"
@@ -60,6 +63,7 @@ python -m posttrain_lab.data task=math
 
 echo "=== smoke math 1/6: SFT base on gold CoT (pi_SFT-math)"
 python -m posttrain_lab.train.sft configs/math/m1_sft_gold.yaml
+python -m posttrain_lab.utils.chat "$(python -m posttrain_lab.config --results-root math)/runs/sft-base_seed17"
 
 echo "=== smoke math 2/6: self-generated preference pairs"
 python -m posttrain_lab.gen_pairs configs/math/m2_gen_pairs.yaml
@@ -75,6 +79,7 @@ python -m posttrain_lab.eval.run_eval task=math
 
 echo "=== smoke math 6/6: aggregate + figures"
 ROOT=$(python -m posttrain_lab.config --results-root math)  # SMOKE=1 -> <RESULTS_DIR>/smoke/math
+python -m posttrain_lab.utils.chat "$ROOT"/runs/*/
 python analysis/aggregate.py "$ROOT"
 python analysis/frontier_math.py "$ROOT"
 python analysis/diversity_plot.py "$ROOT"

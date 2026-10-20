@@ -27,7 +27,7 @@ except ImportError:
 
 from posttrain_lab.config import load_config, train_kwargs
 from posttrain_lab.data import prompt_dataset
-from posttrain_lab.train.common import begin_run, init_path, load_tokenizer, model_kwargs, parse_entry
+from posttrain_lab.train.common import align_eos, begin_run, init_path, load_tokenizer, model_kwargs, parse_entry
 from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
@@ -46,6 +46,7 @@ def main() -> None:
 
     policy = AutoModelForCausalLM.from_pretrained(src, **model_kwargs(cfg))
     ref = AutoModelForCausalLM.from_pretrained(src, **model_kwargs(cfg))
+    align_eos(policy, tokenizer)
     reward_model = AutoModelForSequenceClassification.from_pretrained(
         rm_path, num_labels=1, **model_kwargs(cfg)
     )
@@ -70,7 +71,7 @@ def main() -> None:
         output_dir=str(cfg.output_dir),
         run_name=str(cfg.run_name),
         seed=int(cfg.seed),
-        stop_token="eos",
+        stop_token="eos",  # the tokenizer's eos: the end-of-turn token (load_tokenizer)
         **train_kwargs(cfg, PPOConfig),
     )
     trainer = PPOTrainer(

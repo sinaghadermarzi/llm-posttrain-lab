@@ -691,16 +691,47 @@ def health(run: Run, trainer: str) -> None:
         if isinstance(v, float) and v != v:
             run.warnings.append(f"{k} is NaN")
     pct = run.progress["pct"] if run.progress else None
+    if pct is None and run.step and run.max_steps:
+        pct = 100.0 * run.step / run.max_steps   # finished / stopped runs: from trainer_state
     if trainer == "grpo":
         if m.get("frac_reward_zero_std", 0) >= 0.8:
             run.warnings.append(f"frac_reward_zero_std {fmt_num(m['frac_reward_zero_std'])}: most groups get "
                                 "identical rewards, little learning signal")
-        if m.get("completions/clipped_ratio", 0) >= 0.5:
-            run.warnings.append(f"completions/clipped_ratio {fmt_num(m['completions/clipped_ratio'])}: half the "
-                                "completions hit max_completion_length")
-    if trainer == "dpo" and pct is not None and pct > 30 and m.get("rewards/accuracies", 1) < 0.55:
-        run.warnings.append(f"rewards/accuracies {fmt_num(m['rewards/accuracies'])} at {pct:.0f}%: DPO is barely "
-                            "separating chosen from rejected")
+        clipped = m.get("completions/clipped_ratio", 0)
+        if clipped >= 0.9:
+            run.warnings.append(f"{clipped:.0%} of completions hit max_completion_length: generation is not "
+                                "stopping at end of turn (check: python -m posttrain_lab.utils.chat RUN_DIR)")
+        elif clipped >= 0.5:
+            run.warnings.append(f"{clipped:.0%} of completions hit max_completion_length")
+    if trainer == "dpo" and pct is not None and pct > 30:
+        acc = m.get("rewards/accuracies")
+        if acc is not None and acc < 0.55:
+            run.warnings.append(f"rewards/accuracies {fmt_num(acc)} at {pct:.0f}%: DPO is barely separating "
+                                "chosen from rejected")
+        loss = m.get("loss")
+        if pct >= 50 and isinstance(loss, float) and abs(loss - 0.6931) < 0.01:
+            run.warnings.append(f"loss {fmt_num(loss)} is still ~ln 2 = 0.693 at {pct:.0f}%: the policy has barely "
+                                "moved from the reference")
+
+
+def stop_config_problem(run_dir: Path) -> str | None:
+    """A saved model whose eos never appears in its own chat template cannot
+    stop at end of turn (the first full math run: <|endoftext|> vs <|im_end|>).
+    Read from the saved files, no transformers import."""
+    tc = read_json(run_dir / "tokenizer_config.json")
+    if not tc:
+        return None
+    template = tc.get("chat_template") or ""
+    if not template and (run_dir / "chat_template.jinja").exists():
+        template = (run_dir / "chat_template.jinja").read_text()
+    if not isinstance(template, str) or not template:
+        return None
+    eos = tc.get("eos_token")
+    eos = eos.get("content") if isinstance(eos, dict) else eos
+    if eos and eos not in template:
+        return (f"saved tokenizer's eos {eos!r} never appears in its chat template: generation will not stop at "
+                "end of turn (models trained before the end-of-turn fix; retrain)")
+    return None
 
 
 def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, Job],
@@ -722,6 +753,10 @@ def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, 
             run.metrics = pick_metrics(trainer, last_logged(state))
         run.last_write = _latest_mtime(out)
         run.size = dir_size(out)
+        saved = out if (out / "tokenizer_config.json").exists() else (ckpts[-1] if ckpts else None)
+        problem = stop_config_problem(saved) if saved is not None and stage.kind in ("train", "rm") else None
+        if problem:
+            run.warnings.append(problem)
 
     done = (out / DONE_MARKER).exists()
     if done:
@@ -788,6 +823,13 @@ def pairs_checks(run: Run, cfg, eval_cfg) -> dict | None:
         f"{fmt_num(stats.get('prompts_all_correct'))} prompts all-correct, "
         f"{fmt_num(stats.get('prompts_all_wrong'))} all-wrong (no pair)"
     )
+    unfinished = stats.get("samples_unfinished")
+    if unfinished is not None and stats.get("samples"):
+        share = unfinished / stats["samples"]
+        run.notes.append(f"{fmt_num(unfinished)} samples ({share:.0%}) hit max_new_tokens; "
+                         f"{fmt_num(stats.get('prompts_no_finished_correct', 0))} prompts had no finished correct answer")
+        if share >= 0.5 and os.environ.get("SMOKE") != "1":
+            run.warnings.append(f"{share:.0%} of samples hit max_new_tokens: generation is not stopping at end of turn?")
     expected = split_size(str(cfg.dataset.id), cfg.dataset.get("config"), str(cfg.data.split))
     cap = cfg.data.get("max_samples")
     if cap is not None and expected is not None:
@@ -833,6 +875,27 @@ def split_size(repo: str, config: str | None, split: str) -> int | None:
     return None
 
 
+def unfinished_share(path: Path, limit: int = 400) -> float | None:
+    """Share of a samples file's rows that hit max_new_tokens (row["finished"]
+    is False); None for files written before generation recorded it."""
+    seen = unfinished = 0
+    try:
+        with path.open() as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if "finished" not in row:
+                    return None
+                seen += 1
+                unfinished += not row["finished"]
+                if seen >= limit:
+                    break
+    except (OSError, ValueError):
+        return None
+    return unfinished / seen if seen else None
+
+
 def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
     root = Path(str(eval_cfg.results_root))
     out_dir = Path(str(eval_cfg.eval.out_dir))
@@ -840,6 +903,7 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
     ckpts = discover_all_checkpoints(root / "runs") if (root / "runs").exists() else []
     per_group = {g: 0 for g in groups}
     per_run: dict[str, list[int]] = {}
+    latest_samples: dict[str, Path] = {}
     complete = 0
     for ck in ckpts:
         run_dir = ck.parent if ck.name.startswith("checkpoint-") else ck
@@ -852,6 +916,9 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
         tally = per_run.setdefault(run_dir.name, [0, 0])
         tally[0] += ok
         tally[1] += 1
+        if (out_dir / run_dir.name / f"{ck.name}.samples.jsonl").exists():
+            latest_samples[run_dir.name] = out_dir / run_dir.name / f"{ck.name}.samples.jsonl"
+    unfinished = {name: unfinished_share(path) for name, path in latest_samples.items()}
 
     shards = []
     for job in jobs:
@@ -881,6 +948,7 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
                 if errs:
                     stopped.append({"log": str(log), "errors": errs})
     return {"checkpoints": len(ckpts), "complete": complete, "groups": groups, "per_group": per_group,
+            "unfinished": unfinished,
             "per_run": per_run, "shards": shards, "failed_shards": stopped}
 
 
@@ -1076,6 +1144,10 @@ def attention(report: dict, jobs: list[Job]) -> list[str]:
                 items.append(f"{t} {stage['key']} figures incomplete: {'; '.join(gaps)}")
             ev = stage.get("eval")
             if ev:
+                stuck = [k for k, v in ev.get("unfinished", {}).items() if v is not None and v >= 0.5 and not report["smoke"]]
+                if stuck:
+                    items.append(f"{t} eval: most samples of {', '.join(stuck)} hit max_new_tokens (generation not "
+                                 "stopping at end of turn?)")
                 for sh in ev["failed_shards"]:
                     items.append(f"{t} eval: errors in {Path(sh['log']).name}: {sh['errors']['last_exception'] or sh['errors']['last'][-1]}")
         started = any(s["state"] != "pending" for s in track["stages"])
@@ -1278,6 +1350,10 @@ def render_eval(ev: dict, p: Painter) -> list[str]:
     out.append("        groups: " + "  ".join(f"{g} {n}/{ev['checkpoints']}" for g, n in ev["per_group"].items()))
     runs = "  ".join(f"{name} {a}/{b}" for name, (a, b) in ev["per_run"].items())
     out.append(f"        per run: {runs}")
+    shares = {k: v for k, v in ev.get("unfinished", {}).items() if v is not None}
+    if shares:
+        line = "  ".join(f"{k} {v:.0%}" for k, v in shares.items())
+        out.append(f"        samples hitting max_new_tokens (latest ckpt): {line}")
     for sh in ev["shards"]:
         cur = sh["current"]["checkpoint"].split("/runs/")[-1] if sh["current"] else "starting"
         groups = f" {sh['current']['groups']}" if sh["current"] else ""
