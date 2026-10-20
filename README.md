@@ -257,6 +257,17 @@ tests/                    python -m pytest tests/ (CPU; the download test skips 
 
 ## Known risks / gotchas
 
+- **End of turn vs eos** (base models): Qwen2.5 base declares eos =
+  `<|endoftext|>`, but the chat template ends assistant turns with
+  `<|im_end|>`. Unhandled, nothing stops at `<|im_end|>`: every sample runs to
+  the token cap with invented follow-up turns, which corrupts KL, diversity,
+  the self-generated pairs and GRPO rollouts (the first full math run: 100% of
+  eval samples at 512 tokens). `load_tokenizer` therefore makes the
+  end-of-turn token the eos of every saved checkpoint, every sampler passes it
+  as a stop id, eval rows record `finished`, and `run_all_*.sh` / `make smoke`
+  stop right after π_SFT if `python -m posttrain_lab.utils.chat RUN_DIR`
+  finds a checkpoint that would not stop. Runs from before this fix need
+  retraining; `make status` flags them.
 - **TRL API drift**: PPOTrainer lives in `trl.experimental.ppo` (defensive
   import); pins in `requirements.txt` are load-bearing — bump trl+vllm as a
   pair and re-run `make smoke`.

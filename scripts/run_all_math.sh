@@ -4,8 +4,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+ROOT=$(python -m posttrain_lab.config --results-root math)  # RESULTS_DIR-aware
+
 echo "=== math m1: pi_SFT-math (gold CoT)"
 bash scripts/math/m1_sft_gold.sh
+# stop before hours of sampling if generation would not stop at end of turn
+python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17"
 
 echo "=== math m2: self-generated preference pairs"
 bash scripts/math/m2_gen_pairs.sh
@@ -23,7 +27,6 @@ echo "=== math m4: evaluate all checkpoints"
 bash scripts/math/m4_eval.sh
 
 echo "=== math m5: aggregate + figures"
-ROOT=$(python -m posttrain_lab.config --results-root math)  # RESULTS_DIR-aware
 python analysis/aggregate.py "$ROOT"
 python analysis/frontier_math.py "$ROOT"
 python analysis/diversity_plot.py "$ROOT"
