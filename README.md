@@ -124,6 +124,38 @@ Overrides are OmegaConf dotlist args
 grids live in `configs/{helpful,math}/sweeps.yaml`. Disk: ~250 GB helpful,
 ~60 GB math, under `RESULTS_DIR` (see Storage above).
 
+## Monitoring a run
+
+Launch a track detached, with the GPU logger next to it, then check on it any time:
+
+```bash
+nohup make math-all > math-all.log 2>&1 &   # helpful: > helpful-all.log
+make gpu-log                                 # GPU utilization every 30 s -> gpu_util.csv
+make status                                  # or: make status TASK=math STATUS_ARGS="--watch 60"
+```
+
+`make status` (`python -m posttrain_lab.status`) reads the stage configs, the
+run dirs, the logs and the process table, and prints for each track:
+
+- every stage in `run_all_<task>.sh` order, and every sweep run, as
+  `DONE` / `RUNNING` / `FAILED` / `STOPPED` (output but no DONE marker and
+  nothing running) / `PENDING`, with checkpoints written vs expected and the
+  latest step and training metrics
+- for running jobs: the live progress bar from the job's log (step, elapsed,
+  remaining, expected finish), the GPU it is on, its latest logged metrics
+- stage checks: m2 pair yield (prompts sampled vs the split, train/test
+  pairs), the RM accuracy gate, GRPO zero-variance groups and clipped
+  completions, DPO preference accuracy, eval coverage per metric group and
+  what each eval shard is on
+- GPUs now, plus the `gpu_util.csv` history (mean utilization, idle share)
+- errors found in the logs, a resume command when a track has stopped, and
+  an **attention** list of everything that looks wrong
+
+It is read-only and quick (no torch import). `--json` prints the same report
+as JSON, `--smoke` shows the smoke tree, `--log PATH` points at a `run_all`
+log with a different name. Re-running `make <task>-all` after a stop skips
+finished runs; the report's `resume` line gives the exact command.
+
 ## Offline cluster (Hugging Face assets)
 
 The pipeline loads these from the Hub (`python scripts/prefetch_assets.py --list`):
@@ -211,6 +243,7 @@ src/posttrain_lab/
   data.py                 loaders dispatching on dataset.format (ultrafeedback | gsm8k | pairs_disk)
   tasks/gsm8k.py          THE verifier (extraction, correctness, TRL reward_funcs)
   gen_pairs.py            math m2: self-generated preference pairs + stats.json
+  status.py               make status: per-stage progress, GPUs, errors, attention list
   train/                  thin TRL wrappers (the swappable layer for future verl/OpenRLHF)
   eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
 analysis/                 aggregate → frontier.csv; frontier, frontier_math, retention, diversity, pref_logps, diagnostics
