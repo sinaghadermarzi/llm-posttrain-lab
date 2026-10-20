@@ -9,6 +9,16 @@ cd "$(dirname "$0")/.."
 export SMOKE=1
 export TRL_EXPERIMENTAL_SILENCE=1
 
+# One GPU only. These stages run as plain `python -m` (no accelerate), so with
+# several GPUs visible the HF Trainer wraps the model in nn.DataParallel. TRL
+# 1.7's SFTTrainer binds its own model.forward to the original model on cuda:0
+# (the chunked-CE patch), so the replica on cuda:1 fails with "Expected all
+# tensors to be on the same device". Keep the first visible GPU (default 0);
+# an explicitly empty CUDA_VISIBLE_DEVICES still means CPU.
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-0}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES%%,*}"
+echo "[smoke] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<empty: CPU>}"
+
 echo "=== smoke helpful 0/9: data loaders"
 python -m posttrain_lab.data
 
