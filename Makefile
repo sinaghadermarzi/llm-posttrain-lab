@@ -1,4 +1,4 @@
-.PHONY: preflight prefetch smoke all \
+.PHONY: preflight prefetch smoke all status gpu-log \
 	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-grpo math-eval math-plots math-all
 
@@ -15,6 +15,20 @@ prefetch:
 
 smoke:
 	bash scripts/run_smoke.sh
+
+# where each track stands: stages, live progress, GPUs, errors, what needs
+# attention (README "Monitoring a run"). TASK=math|helpful|all,
+# STATUS_ARGS="--watch 60" / "--json" / "--smoke"
+TASK ?= all
+STATUS_ARGS ?=
+status:
+	python -m posttrain_lab.status $(TASK) $(STATUS_ARGS)
+
+# sample every GPU each 30 s into gpu_util.csv (make status summarizes it);
+# stop with: pkill -f 'nvidia-smi --query-gpu=timestamp'
+gpu-log:
+	nohup nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used,power.draw --format=csv -l 30 >> gpu_util.csv 2>&1 &
+	@echo "logging GPU utilization to gpu_util.csv"
 
 all:
 	bash scripts/run_all.sh
