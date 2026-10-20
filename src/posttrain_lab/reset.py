@@ -84,14 +84,25 @@ def _ancestors(procs: list[dict]) -> set[int]:
 
 
 def track_processes(tasks: list[str], smoke: bool, procs: list[dict] | None = None) -> dict[int, str]:
-    """pid -> why, for every process of this repo driving or running the tracks."""
+    """pid -> why, for every process of this repo driving or running the tracks.
+
+    A driver shared with a track that is not being reset (run_all.sh / make
+    all, or run_smoke.sh / make smoke for one smoke track) is stopped on its
+    own, without its process tree: its children may be the other track's run,
+    which keeps going (and nothing starts this track's stages after it)."""
     procs = status.list_processes() if procs is None else procs
     roots: dict[int, str] = {}
+    partial = set(tasks) != set(status.TRACKS)
+    shared_scripts = {"run_smoke.sh"} if smoke else {"run_all.sh"}
+    shared_targets = {"smoke"} if smoke else {"all"}
+    shared: set[int] = set()
 
     scripts = {"run_smoke.sh"} if smoke else {status.TRACKS[t]["driver"] for t in tasks} | {"run_all.sh"}
     for d in status.find_drivers(procs):
         if d["script"] in scripts:
             roots[d["pid"]] = f"driver {d['script']}"
+            if partial and d["script"] in shared_scripts:
+                shared.add(d["pid"])
 
     targets = MAKE_TARGETS["smoke"] if smoke else set().union(*(MAKE_TARGETS[t] for t in tasks))
     stage_dirs = [] if smoke else [f"scripts/{t}/" for t in tasks]
@@ -108,6 +119,8 @@ def track_processes(tasks: list[str], smoke: bool, procs: list[dict] | None = No
         # the cwd check last: it is an lsof call per process off Linux
         if why and status.in_this_repo(p["pid"]):
             roots[p["pid"]] = why
+            if partial and exe in ("make", "gmake") and not (targets - shared_targets) & set(words[1:]):
+                shared.add(p["pid"])
 
     track_roots = {str(safe_root(t, smoke)) for t in tasks}
     for job in status.find_jobs(procs):
@@ -128,8 +141,10 @@ def track_processes(tasks: list[str], smoke: bool, procs: list[dict] | None = No
     # everything they started: torchrun ranks, vLLM engine cores, shells
     keep_out = _ancestors(procs)
     out: dict[int, str] = {}
-    for pid in _descendants(set(roots), procs) - keep_out:
+    for pid in _descendants(set(roots) - shared, procs) - keep_out:
         out[pid] = roots.get(pid) or f"child: {next(p['args'] for p in procs if p['pid'] == pid)[:100]}"
+    for pid in shared - keep_out:
+        out[pid] = f"{roots[pid]} (shared with the other track: this process only)"
     return out
 
 
@@ -207,7 +222,9 @@ def track_logs(tasks: list[str], smoke: bool) -> list[Path]:
     if smoke:
         names = ["smoke.log"]
     else:
-        names = [n for t in tasks for n in status.TRACKS[t]["logs"] if n not in ("all.log", "nohup.out")]
+        # all.log (make all) belongs to both tracks: only a full reset removes it
+        shared = {"nohup.out"} | (set() if set(tasks) == set(status.TRACKS) else {"all.log"})
+        names = list(dict.fromkeys(n for t in tasks for n in status.TRACKS[t]["logs"] if n not in shared))
         names += [s.log.replace("{ov}", "*").replace("{i}", "*") for t in tasks
                   for s in status.TRACKS[t]["stages"] if s.log]
     found: list[Path] = []
@@ -216,11 +233,20 @@ def track_logs(tasks: list[str], smoke: bool) -> list[Path]:
     return found
 
 
-def hf_tmp_files() -> list[Path]:
-    """tmp* files a crashed dataset map left next to prepared datasets."""
+STALE_TMP_S = 3600
+
+
+def hf_tmp_files(min_age_s: float = STALE_TMP_S) -> list[Path]:
+    """tmp* files a crashed dataset map left next to prepared datasets. The
+    cache may be shared (the other track, preflight, other checkouts), so only
+    files nothing has written to for min_age_s: a live map keeps its tmp file
+    fresh."""
     root = Path(os.environ.get("HF_DATASETS_CACHE") or Path(
         os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface") / "datasets")
-    return sorted(p for p in root.glob("*/*/*/*/tmp*") if p.is_file()) if root.exists() else []
+    if not root.exists():
+        return []
+    cutoff = time.time() - min_age_s
+    return sorted(p for p in root.glob("*/*/*/*/tmp*") if p.is_file() and p.stat().st_mtime < cutoff)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +310,7 @@ def show(pl: dict, archive: bool, do_relaunch: bool) -> None:
         else:
             dest = f" -> {root.name}.<timestamp>" if archive else ""
             print(f"   {root}  ({status.fmt_bytes(size)}){dest}")
-    print("\n3. remove logs and dataset-cache leftovers")
+    print(f"\n3. remove logs and dataset-cache leftovers (tmp* untouched for {STALE_TMP_S // 60} min)")
     for path in pl["logs"] + pl["hf_tmp"]:
         print(f"   {path}")
     if not pl["logs"] and not pl["hf_tmp"]:
@@ -315,13 +341,32 @@ def confirm(pl: dict) -> bool:
     return answer == word
 
 
+def stop_until_quiet(tasks: list[str], smoke: bool, timeout: float, rounds: int = 5) -> list[int]:
+    """Re-scan the track's processes and stop them until a scan finds none:
+    the plan was printed before the confirmation prompt, and a driver may
+    have started a new job since. Returns what is still running (empty: quiet)."""
+    stopped = 0
+    for _ in range(rounds):
+        found = track_processes(tasks, smoke)
+        if not found:
+            print(f"   stopped {stopped} process(es)" if stopped else "   nothing to stop")
+            return []
+        for pid, why in sorted(found.items()):
+            print(f"   stopping {pid}  {why}")
+        survivors = stop(sorted(found), timeout)
+        if survivors:
+            return survivors
+        stopped += len(found)
+        time.sleep(1.0)  # let a dying driver's last spawn show up in the next scan
+    return sorted(track_processes(tasks, smoke))
+
+
 def execute(pl: dict, archive: bool, timeout: float) -> bool:
     print("\n== stopping jobs")
-    survivors = stop(sorted(pl["processes"]), timeout) if pl["processes"] else []
+    survivors = stop_until_quiet(pl["tasks"], pl["smoke"], timeout)
     if survivors:
-        print(f"[reset] ABORT: still running after SIGKILL: {survivors}; nothing deleted")
+        print(f"[reset] ABORT: still running: {survivors}; nothing deleted")
         return False
-    print("   done" if pl["processes"] else "   nothing to stop")
 
     print("== results")
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
