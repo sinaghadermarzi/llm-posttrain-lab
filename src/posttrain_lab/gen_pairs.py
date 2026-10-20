@@ -38,7 +38,7 @@ def build_pairs(samples: list[dict], gold_by_prompt: dict[str, str], max_per_pro
         by_prompt[sample["prompt_id"]].append(sample)
 
     rng = random.Random(seed)
-    rows, n_all_correct, n_all_wrong = [], 0, 0
+    rows, n_all_correct, n_all_wrong, n_unfinished_correct = [], 0, 0, 0
     for prompt_id, group in sorted(by_prompt.items()):
         gold = gold_by_prompt[prompt_id]
         correct = [s for s in group if is_correct(s["response"], gold)]
@@ -48,6 +48,12 @@ def build_pairs(samples: list[dict], gold_by_prompt: dict[str, str], max_per_pro
             continue
         if not correct:
             n_all_wrong += 1
+            continue
+        # chosen = a complete correct answer: one cut off at max_new_tokens
+        # would teach DPO to prefer not stopping
+        correct = [s for s in correct if s.get("finished", True)]
+        if not correct:
+            n_unfinished_correct += 1
             continue
         rng.shuffle(correct)
         rng.shuffle(wrong)
@@ -69,6 +75,8 @@ def build_pairs(samples: list[dict], gold_by_prompt: dict[str, str], max_per_pro
         "pairs": len(rows),
         "prompts_all_correct": n_all_correct,
         "prompts_all_wrong": n_all_wrong,
+        "prompts_no_finished_correct": n_unfinished_correct,
+        "samples_unfinished": sum(not s.get("finished", True) for s in samples),
     }
     return rows, stats
 

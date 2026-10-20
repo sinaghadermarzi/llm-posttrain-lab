@@ -13,7 +13,7 @@ from trl import SFTConfig, SFTTrainer
 
 from posttrain_lab.config import load_config, train_kwargs
 from posttrain_lab.data import sft_dataset
-from posttrain_lab.train.common import begin_run, init_path, load_tokenizer, model_kwargs, parse_entry
+from posttrain_lab.train.common import align_eos, begin_run, init_path, load_tokenizer, model_kwargs, parse_entry
 from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
@@ -28,6 +28,7 @@ def main() -> None:
     src = init_path(cfg)
     tokenizer = load_tokenizer(src)
     model = AutoModelForCausalLM.from_pretrained(src, **model_kwargs(cfg))
+    align_eos(model, tokenizer)
 
     args = SFTConfig(
         output_dir=str(cfg.output_dir),
