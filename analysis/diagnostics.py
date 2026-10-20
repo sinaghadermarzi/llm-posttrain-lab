@@ -20,7 +20,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from paths import default_root
+from paths import default_root  # also puts src/ on sys.path
+from posttrain_lab.utils.checkpoints import list_checkpoints
 from style import BLUE_RAMP, INK, METHOD_COLORS, apply_style
 
 
@@ -31,24 +32,31 @@ def dpo_logp_trajectories(results_root: Path, out_dir: Path) -> None:
         return
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
     for i, run in enumerate(runs):
-        states = sorted(run.glob("checkpoint-*/trainer_state.json"))
+        # numeric step order: as strings, checkpoint-800 sorts after checkpoint-1000
+        states = [c / "trainer_state.json" for c in list_checkpoints(run) if (c / "trainer_state.json").exists()]
         if not states:
             continue
-        history = json.loads(states[-1].read_text())["log_history"]
+        history = json.loads(states[-1].read_text())["log_history"]  # latest = fullest history
         rows = [h for h in history if "logps/chosen" in h]
         if not rows:
             continue
         steps = [h["step"] for h in rows]
         color = BLUE_RAMP[i % len(BLUE_RAMP)]
         beta = run.name.split("_")[1].replace("beta", "β=")
-        ax.plot(steps, [h["logps/chosen"] for h in rows], color=color, label=f"{beta} chosen")
-        ax.plot(steps, [h["logps/rejected"] for h in rows], color=color, linestyle="--", alpha=0.7)
+        # markers so a run with a single logged step (e.g. smoke) still shows
+        ax.plot(steps, [h["logps/chosen"] for h in rows], color=color, marker="o", markersize=3,
+                label=f"{beta} chosen")
+        ax.plot(steps, [h["logps/rejected"] for h in rows], color=color, marker="o", markersize=3,
+                linestyle="--", alpha=0.7)
         ax.annotate(beta, (steps[-1], rows[-1]["logps/chosen"]),
                     textcoords="offset points", xytext=(5, 0), fontsize=8, color=INK)
     ax.set_xlabel("training step")
     ax.set_ylabel("mean log-prob of completion")
     ax.set_title("DPO: chosen (solid) and rejected (dashed) log-probs both drift down", fontsize=11)
-    ax.legend(fontsize=8, ncol=2)
+    if ax.get_lines():
+        ax.legend(fontsize=8, ncol=2)
+    else:
+        print("no logps/chosen in any DPO run's trainer_state.json; dpo_logps figure is empty")
     fig.savefig(out_dir / "dpo_logps.png")
     print(f"wrote {out_dir}/dpo_logps.png")
 
