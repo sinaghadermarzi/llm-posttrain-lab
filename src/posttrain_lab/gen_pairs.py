@@ -25,7 +25,7 @@ from pathlib import Path
 from datasets import Dataset, DatasetDict
 
 from posttrain_lab.config import load_config
-from posttrain_lab.data import eval_prompts
+from posttrain_lab.data import prompt_rows
 from posttrain_lab.eval.generate import sample_responses
 from posttrain_lab.tasks.gsm8k import is_correct
 from posttrain_lab.train.common import begin_run, init_path, parse_entry
@@ -82,7 +82,8 @@ def main() -> None:
         return
     begin_run(cfg)
 
-    prompts = eval_prompts(cfg, split=str(cfg.data.split), num=cfg.data.get("max_samples"))
+    # data.max_samples=null -> every train prompt (not eval.num_prompts)
+    prompts = prompt_rows(cfg, str(cfg.data.split), cfg.data.get("max_samples"))
     gold_by_prompt = {p["prompt_id"]: p["answer"] for p in prompts}
     print(f"[gen_pairs] sampling {cfg.eval.samples_per_prompt} solutions x {len(prompts)} prompts")
     samples = sample_responses(cfg, init_path(cfg), prompts)

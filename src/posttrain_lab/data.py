@@ -119,8 +119,15 @@ def prompt_dataset(cfg: DictConfig) -> Dataset:
 
 def eval_prompts(cfg: DictConfig, split: str | None = None, num: int | None = None) -> list[dict]:
     """Held-out prompts for the frontier evaluation, as
-    [{prompt_id, prompt, messages, (answer)}, ...]."""
-    ds = _load_split(cfg, split or cfg.eval.prompts_split, num or int(cfg.eval.num_prompts))
+    [{prompt_id, prompt, messages, (answer)}, ...]. ``num`` defaults to
+    eval.num_prompts."""
+    return prompt_rows(cfg, split or cfg.eval.prompts_split, num or int(cfg.eval.num_prompts))
+
+
+def prompt_rows(cfg: DictConfig, split: str, max_samples: int | None) -> list[dict]:
+    """Prompts of ``split`` in the eval_prompts row format; max_samples=None
+    means the whole split (gen_pairs samples every train prompt)."""
+    ds = _load_split(cfg, split, max_samples)
     if _format(cfg) == "gsm8k":
         return [
             {
