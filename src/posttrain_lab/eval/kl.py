@@ -9,8 +9,8 @@ Per-token estimators of KL(pi || pi_ref), with r = pi_ref(t) / pi(t):
   k3 = r - 1 - log r     (unbiased, low variance, always >= 0; Schulman 2020,
                           the same estimator GRPO uses for its KL term)
 Sequence KL = sum of per-token values; we report the mean over sequences.
-A response that stopped (row["finished"]) is scored with its end-of-turn
-token: deciding to stop is part of the policy's distribution.
+A response that stopped is scored with the token it stopped on
+(row["stop_token_id"]): deciding to stop is part of the policy's distribution.
 
 Also returns mean response length (tokens) and mean sampled-token negative
 logprob under the policy (an MC estimate of token entropy) — the cheap
@@ -34,6 +34,18 @@ def response_logprobs(model, input_ids, attention_mask, response_mask):
     target = input_ids[:, 1:].unsqueeze(-1)
     token_logprobs = logprobs.gather(-1, target).squeeze(-1)
     return token_logprobs * response_mask[:, 1:]
+
+
+def scored_response(sample: dict, tokenizer, eot: str) -> str:
+    """The response text to score: with the token it actually stopped on, if it
+    stopped. Rows from before stop_token_id was recorded fall back to the
+    template's end-of-turn token."""
+    if not sample.get("finished"):
+        return sample["response"]
+    if "stop_token_id" in sample:
+        stop = sample["stop_token_id"]
+        return sample["response"] + (tokenizer.convert_ids_to_tokens(stop) if stop is not None else "")
+    return sample["response"] + eot
 
 
 def compute_kl(cfg: DictConfig, policy_path: str, samples: list[dict]) -> dict:
@@ -60,7 +72,7 @@ def compute_kl(cfg: DictConfig, policy_path: str, samples: list[dict]) -> dict:
             )
             for s in batch
         ]
-        full_texts = [p + s["response"] + (eot if s.get("finished") else "") for p, s in zip(prompt_texts, batch)]
+        full_texts = [p + scored_response(s, tokenizer, eot) for p, s in zip(prompt_texts, batch)]
         enc = tokenizer(full_texts, return_tensors="pt", padding=True, truncation=True, max_length=4096)
         prompt_lens = [len(tokenizer(p)["input_ids"]) for p in prompt_texts]
 

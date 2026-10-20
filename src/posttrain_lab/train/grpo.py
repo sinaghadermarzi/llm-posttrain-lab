@@ -18,8 +18,20 @@ from trl import GRPOConfig, GRPOTrainer
 from posttrain_lab.config import load_config, train_kwargs
 from posttrain_lab.data import prompt_dataset
 from posttrain_lab.train.common import begin_run, init_path, load_tokenizer, parse_entry
-from posttrain_lab.utils.chat import stop_token_ids
 from posttrain_lab.utils.checkpoints import is_done, mark_done
+
+
+def rollout_generation_kwargs(tokenizer, use_vllm: bool, extra: dict | None = None) -> dict:
+    """Stop rollouts at the tokenizer's eos (the end-of-turn token, see
+    load_tokenizer) and only there: TRL 1.7 masks completions at
+    processing_class.eos_token_id, so a different stop id would leave its
+    padded tail counted as completion tokens. vLLM gets it explicitly (it
+    otherwise stops only at the checkpoint's own eos ids); TRL's HF path
+    already passes eos_token_id=tokenizer.eos_token_id."""
+    out = dict(extra or {})
+    if use_vllm:
+        out["stop_token_ids"] = [tokenizer.eos_token_id]
+    return out
 
 
 def main() -> None:
@@ -40,13 +52,9 @@ def main() -> None:
     else:
         reward_funcs = str(cfg.reward_model_path)
 
-    # stop rollouts at end of turn: vLLM only stops at what SamplingParams /
-    # the checkpoint's generation_config name, HF generate at eos_token_id
-    stops = stop_token_ids(tokenizer, src)
     kwargs = train_kwargs(cfg, GRPOConfig)
-    use_vllm = bool(kwargs.get("use_vllm"))
-    kwargs["generation_kwargs"] = {**(kwargs.get("generation_kwargs") or {}),
-                                   ("stop_token_ids" if use_vllm else "eos_token_id"): stops}
+    kwargs["generation_kwargs"] = rollout_generation_kwargs(tokenizer, bool(kwargs.get("use_vllm")),
+                                                            kwargs.get("generation_kwargs"))
     args = GRPOConfig(
         output_dir=str(cfg.output_dir),
         run_name=str(cfg.run_name),

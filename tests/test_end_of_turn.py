@@ -133,17 +133,54 @@ def test_hf_generate_stops_and_records_finished(monkeypatch, tmp_path: Path) -> 
 
     def fake_generate(self, input_ids=None, attention_mask=None, num_return_sequences=1, eos_token_id=None, **kw):
         seen["eos_token_id"] = eos_token_id
-        tails = torch.tensor([[HI, IM_END, THERE, THERE, THERE], [HI, THERE, HI, THERE, HI]])
+        tails = torch.tensor([[HI, IM_END, THERE, THERE, THERE], [HI, THERE, HI, THERE, HI],
+                              [THERE, ENDOFTEXT, ENDOFTEXT, ENDOFTEXT, ENDOFTEXT]])
         return torch.cat([input_ids.repeat_interleave(num_return_sequences, 0), tails.repeat(len(input_ids), 1)], 1)
 
     monkeypatch.setattr(transformers.GenerationMixin, "generate", fake_generate)
     cfg = OmegaConf.create({"seed": 1, "model": {"dtype": "float32"},
-                            "eval": {"samples_per_prompt": 2, "temperature": 1.0, "top_p": 1.0, "max_new_tokens": 5,
+                            "eval": {"samples_per_prompt": 3, "temperature": 1.0, "top_p": 1.0, "max_new_tokens": 5,
                                      "use_vllm": False, "logprob_batch_size": 4}})
     rows = generate.sample_responses(cfg, str(ckpt), [{"prompt_id": "p0", "prompt": "q",
                                                         "messages": [{"role": "user", "content": "q"}]}])
     assert seen["eos_token_id"] == [IM_END, ENDOFTEXT]
-    assert [(r["response"], r["finished"]) for r in rows] == [("hi", True), ("hi there hi there hi", False)]
+    assert [(r["response"], r["finished"], r["stop_token_id"]) for r in rows] == [
+        ("hi", True, IM_END), ("hi there hi there hi", False, None), ("there", True, ENDOFTEXT)]
+
+
+def test_vllm_stop_token() -> None:
+    from types import SimpleNamespace as C
+
+    from posttrain_lab.eval.generate import vllm_stop_token
+
+    stops = [IM_END, ENDOFTEXT]
+    assert vllm_stop_token(C(finish_reason="stop", stop_reason=ENDOFTEXT, token_ids=[HI, ENDOFTEXT]), stops) == ENDOFTEXT
+    assert vllm_stop_token(C(finish_reason="stop", stop_reason=None, token_ids=[HI, IM_END]), stops) == IM_END  # EOS stop
+    assert vllm_stop_token(C(finish_reason="length", stop_reason=None, token_ids=[HI, HI]), stops) is None
+
+
+def test_kl_scores_the_token_the_sample_stopped_on() -> None:
+    from posttrain_lab.eval.kl import scored_response
+
+    tok = chat.use_end_of_turn_eos(qwen_like_tokenizer())
+    assert scored_response({"response": "hi", "finished": True, "stop_token_id": ENDOFTEXT}, tok, "<|im_end|>") \
+        == "hi<|endoftext|>"
+    assert scored_response({"response": "hi", "finished": True, "stop_token_id": IM_END}, tok, "<|im_end|>") \
+        == "hi<|im_end|>"
+    assert scored_response({"response": "hi", "finished": True, "stop_token_id": None}, tok, "<|im_end|>") == "hi"
+    assert scored_response({"response": "hi", "finished": True}, tok, "<|im_end|>") == "hi<|im_end|>"  # older rows
+    assert scored_response({"response": "hi", "finished": False, "stop_token_id": None}, tok, "<|im_end|>") == "hi"
+
+
+def test_grpo_rollouts_stop_where_trl_masks() -> None:
+    """TRL 1.7 masks GRPO completions at the tokenizer's eos only, so rollouts
+    must stop there and nowhere else."""
+    from posttrain_lab.train.grpo import rollout_generation_kwargs
+
+    tok = chat.use_end_of_turn_eos(qwen_like_tokenizer())
+    assert rollout_generation_kwargs(tok, use_vllm=True) == {"stop_token_ids": [IM_END]}
+    assert rollout_generation_kwargs(tok, use_vllm=False) == {}  # TRL passes eos_token_id=tokenizer.eos_token_id
+    assert rollout_generation_kwargs(tok, True, {"top_k": 5}) == {"top_k": 5, "stop_token_ids": [IM_END]}
 
 
 def test_kl_scores_the_end_of_turn_token(monkeypatch, tmp_path: Path) -> None:
