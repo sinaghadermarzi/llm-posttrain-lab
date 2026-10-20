@@ -2,6 +2,11 @@
 results/*
 !results/.gitkeep
 
+# run logs (run_all, per-run DPO / eval shard logs, GPU logger)
+*.log
+nohup.out
+gpu_util.csv
+
 # local secrets / endpoints (see .env.example)
 .env
 

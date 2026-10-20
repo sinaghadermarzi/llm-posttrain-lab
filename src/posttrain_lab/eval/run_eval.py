@@ -33,6 +33,7 @@ from posttrain_lab.config import load_config
 from posttrain_lab.data import eval_prompts
 from posttrain_lab.eval import diversity, pref_logps, retention
 from posttrain_lab.eval.generate import sample_responses
+from posttrain_lab.eval.groups import SENTINELS
 from posttrain_lab.eval.kl import compute_kl
 from posttrain_lab.eval.passk import passk_metrics
 from posttrain_lab.eval.reward_score import score_samples
@@ -76,15 +77,17 @@ def _core_math(cfg, ckpt, ctx) -> dict:
     }
 
 
-# group name -> (sentinel keys, compute_fn(cfg, ckpt, ctx) -> partial row)
-GROUPS = {
-    "core": (["kl_k3", "reward_train_rm", "reward_judge"], _core_helpful),
-    "core_math": (["kl_k3", "pass1"], _core_math),
-    "retention_ppl": (["ppl_wikitext"], retention.ppl_group),
-    "retention_harness": (["harness"], retention.harness_group),
-    "diversity": (["distinct_2", "self_bleu"], diversity.compute_group),
-    "pref_logps": (["logp_chosen"], pref_logps.compute_group),
+# group name -> (sentinel keys, compute_fn(cfg, ckpt, ctx) -> partial row);
+# the sentinels live in eval/groups.py so posttrain_lab.status can read them
+_COMPUTE = {
+    "core": _core_helpful,
+    "core_math": _core_math,
+    "retention_ppl": retention.ppl_group,
+    "retention_harness": retention.harness_group,
+    "diversity": diversity.compute_group,
+    "pref_logps": pref_logps.compute_group,
 }
+GROUPS = {name: (SENTINELS[name], fn) for name, fn in _COMPUTE.items()}
 
 
 def _parse_args(argv: list[str]) -> tuple[list[str], tuple[int, int], list[str]]:
