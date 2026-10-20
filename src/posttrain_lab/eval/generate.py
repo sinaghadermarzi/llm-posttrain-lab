@@ -4,6 +4,10 @@ Sampling is at the policy's own distribution (temperature/top_p from
 eval.yaml, 1.0/1.0 by default) — a requirement for the Monte-Carlo KL
 estimate to be unbiased, not a style choice.
 
+Generation stops at the chat template's end-of-turn token (utils/chat.py),
+passed explicitly so checkpoints saved with a base-model eos stop too. Each
+row records `finished`: False means it hit max_new_tokens.
+
 Uses vLLM when available and enabled; falls back to batched HF generate
 (the smoke path, and any box without vllm installed).
 """
@@ -14,17 +18,37 @@ from omegaconf import DictConfig
 
 
 def sample_responses(cfg: DictConfig, checkpoint: str, prompts: list[dict]) -> list[dict]:
-    """Returns rows: {prompt_id, prompt, sample_idx, response}."""
+    """Returns rows: {prompt_id, prompt, sample_idx, response, finished}."""
     n = int(cfg.eval.samples_per_prompt)
+    stops = _stop_ids(checkpoint)
     if bool(cfg.eval.use_vllm):
         try:
-            return _vllm_generate(cfg, checkpoint, prompts, n)
+            rows = _vllm_generate(cfg, checkpoint, prompts, n, stops)
         except ImportError:
             print("[generate] vllm not installed, falling back to HF generate")
-    return _hf_generate(cfg, checkpoint, prompts, n)
+        else:
+            _report(rows, cfg)
+            return rows
+    rows = _hf_generate(cfg, checkpoint, prompts, n, stops)
+    _report(rows, cfg)
+    return rows
 
 
-def _vllm_generate(cfg, checkpoint, prompts, n):
+def _stop_ids(checkpoint: str) -> list[int]:
+    from transformers import AutoTokenizer
+
+    from posttrain_lab.utils.chat import stop_token_ids
+
+    return stop_token_ids(AutoTokenizer.from_pretrained(checkpoint), checkpoint)
+
+
+def _report(rows: list[dict], cfg) -> None:
+    unfinished = sum(not r["finished"] for r in rows)
+    print(f"[generate] {len(rows)} samples, {unfinished} ({unfinished / max(len(rows), 1):.0%}) "
+          f"hit max_new_tokens={int(cfg.eval.max_new_tokens)} without stopping")
+
+
+def _vllm_generate(cfg, checkpoint, prompts, n, stops):
     from vllm import LLM, SamplingParams
 
     llm = LLM(model=checkpoint, dtype=str(cfg.model.dtype), gpu_memory_utilization=0.85)
@@ -34,6 +58,7 @@ def _vllm_generate(cfg, checkpoint, prompts, n):
         top_p=float(cfg.eval.top_p),
         max_tokens=int(cfg.eval.max_new_tokens),
         seed=int(cfg.seed),
+        stop_token_ids=stops,
     )
     outputs = llm.chat([p["messages"] for p in prompts], params)
     rows = []
@@ -45,12 +70,13 @@ def _vllm_generate(cfg, checkpoint, prompts, n):
                     "prompt": prompt["prompt"],
                     "sample_idx": i,
                     "response": completion.text,
+                    "finished": completion.finish_reason == "stop",
                 }
             )
     return rows
 
 
-def _hf_generate(cfg, checkpoint, prompts, n):
+def _hf_generate(cfg, checkpoint, prompts, n, stops):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -82,17 +108,21 @@ def _hf_generate(cfg, checkpoint, prompts, n):
                 max_new_tokens=int(cfg.eval.max_new_tokens),
                 num_return_sequences=n,
                 pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=stops,
             )
         completions = out[:, enc["input_ids"].shape[1] :]
         for j, prompt in enumerate(batch_prompts):
             for i in range(n):
-                text = tokenizer.decode(completions[j * n + i], skip_special_tokens=True)
+                ids = completions[j * n + i].tolist()
+                cut = next((k for k, t in enumerate(ids) if t in stops), None)
+                text = tokenizer.decode(ids[:cut], skip_special_tokens=True)
                 rows.append(
                     {
                         "prompt_id": prompt["prompt_id"],
                         "prompt": prompt["prompt"],
                         "sample_idx": i,
                         "response": text,
+                        "finished": cut is not None,
                     }
                 )
     return rows

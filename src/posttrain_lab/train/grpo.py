@@ -18,6 +18,7 @@ from trl import GRPOConfig, GRPOTrainer
 from posttrain_lab.config import load_config, train_kwargs
 from posttrain_lab.data import prompt_dataset
 from posttrain_lab.train.common import begin_run, init_path, load_tokenizer, parse_entry
+from posttrain_lab.utils.chat import stop_token_ids
 from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
@@ -39,11 +40,18 @@ def main() -> None:
     else:
         reward_funcs = str(cfg.reward_model_path)
 
+    # stop rollouts at end of turn: vLLM only stops at what SamplingParams /
+    # the checkpoint's generation_config name, HF generate at eos_token_id
+    stops = stop_token_ids(tokenizer, src)
+    kwargs = train_kwargs(cfg, GRPOConfig)
+    use_vllm = bool(kwargs.get("use_vllm"))
+    kwargs["generation_kwargs"] = {**(kwargs.get("generation_kwargs") or {}),
+                                   ("stop_token_ids" if use_vllm else "eos_token_id"): stops}
     args = GRPOConfig(
         output_dir=str(cfg.output_dir),
         run_name=str(cfg.run_name),
         seed=int(cfg.seed),
-        **train_kwargs(cfg, GRPOConfig),
+        **kwargs,
     )
     trainer = GRPOTrainer(
         model=src,

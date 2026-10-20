@@ -7,8 +7,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+ROOT=$(python -m posttrain_lab.config --results-root helpful)  # RESULTS_DIR-aware
+
 echo "=== stage 1: pi_SFT"
 bash scripts/helpful/stage1_sft_base.sh
+# stop before the RL arms if generation would not stop at end of turn
+python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17"
 
 echo "=== stage 2: reward model (gated on pairwise accuracy)"
 bash scripts/helpful/stage2_rm.sh
@@ -29,7 +33,6 @@ echo "=== stage 4: evaluate all checkpoints"
 bash scripts/helpful/stage4_eval.sh
 
 echo "=== stage 5: aggregate + figures"
-ROOT=$(python -m posttrain_lab.config --results-root helpful)  # RESULTS_DIR-aware
 python analysis/aggregate.py "$ROOT"
 python analysis/frontier_plot.py "$ROOT"
 python analysis/diagnostics.py "$ROOT"

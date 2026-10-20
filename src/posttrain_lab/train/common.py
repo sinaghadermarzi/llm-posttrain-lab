@@ -10,6 +10,7 @@ from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
 from posttrain_lab.config import seed_everything
+from posttrain_lab.utils.chat import use_end_of_turn_eos
 from posttrain_lab.utils.logging import setup_tracking
 
 
@@ -35,10 +36,27 @@ def init_path(cfg: DictConfig) -> str:
 
 
 def load_tokenizer(path: str) -> "AutoTokenizer":
+    """The stage's tokenizer, with eos = the chat template's end-of-turn token
+    (<|im_end|> for Qwen; utils/chat.py). Pad is set first, from the original
+    eos, so it never equals the end-of-turn token."""
     tok = AutoTokenizer.from_pretrained(path)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
-    return tok
+    return use_end_of_turn_eos(tok)
+
+
+def align_eos(model, tokenizer) -> None:
+    """Point the model's config and generation_config at the tokenizer's eos,
+    keeping the original eos ids as extra stops, so the checkpoint it saves
+    (and vLLM loading it) stops at end of turn. The HF Trainer does the same
+    at init; this covers models built outside it."""
+    eos = tokenizer.eos_token_id
+    model.config.eos_token_id = eos
+    gen = getattr(model, "generation_config", None)
+    if gen is not None:
+        old = gen.eos_token_id
+        old = [] if old is None else [old] if isinstance(old, int) else list(old)
+        gen.eos_token_id = [eos] + [i for i in old if i != eos]
 
 
 def model_kwargs(cfg: DictConfig) -> dict:
