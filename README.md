@@ -159,6 +159,28 @@ runs, `--log PATH` points at a launcher log with a different name (each track
 reads only its own `=== ` headers from it). Re-running `make <task>-all` after a stop skips
 finished runs; the report's `resume` line gives the exact command.
 
+### Starting over
+
+To throw away a track's run and start it clean (a fix landed, a config
+changed), use `make reset` rather than deleting by hand:
+
+```bash
+make reset TASK=math RESET_ARGS="--dry-run"    # look first: what would stop / be removed
+make reset TASK=math RESET_ARGS="--relaunch"   # do it, then start math-all again, detached
+make reset-smoke                               # the smoke tree (before re-running make smoke)
+```
+
+`python -m posttrain_lab.reset {math|helpful|all}` stops this repo's jobs for
+that track (driver, make target, stage scripts, every training/pairs/eval job
+writing into it and their child processes; the other track and other
+checkouts are left alone), deletes `$RESULTS_DIR/<task>` (`--archive` renames
+it to `<task>.<timestamp>` instead), removes the track's logs and any
+half-written `tmp*` files in the HF datasets cache, and with `--relaunch`
+restarts the GPU logger and `make <task>-all` in the background. It prints
+the plan and asks you to type the track name first (`--yes` skips that). The
+HF cache, `.env`, other tracks' and smoke results, and MLflow runs are never
+touched.
+
 ## Offline cluster (Hugging Face assets)
 
 The pipeline loads these from the Hub (`python scripts/prefetch_assets.py --list`):
@@ -247,6 +269,7 @@ src/posttrain_lab/
   tasks/gsm8k.py          THE verifier (extraction, correctness, TRL reward_funcs)
   gen_pairs.py            math m2: self-generated preference pairs + stats.json
   status.py               make status: per-stage progress, GPUs, errors, attention list
+  reset.py                make reset: stop a track's jobs, clear its results/logs, relaunch
   train/                  thin TRL wrappers (the swappable layer for future verl/OpenRLHF)
   eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
 analysis/                 aggregate → frontier.csv; frontier, frontier_math, retention, diversity, pref_logps, diagnostics
