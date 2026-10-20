@@ -6,7 +6,8 @@ estimate to be unbiased, not a style choice.
 
 Generation stops at the chat template's end-of-turn token (utils/chat.py),
 passed explicitly so checkpoints saved with a base-model eos stop too. Each
-row records `finished`: False means it hit max_new_tokens.
+row records `finished` (False: it hit max_new_tokens) and `stop_token_id`,
+the id it actually stopped on, which KL scores (eval/kl.py).
 
 Uses vLLM when available and enabled; falls back to batched HF generate
 (the smoke path, and any box without vllm installed).
@@ -18,7 +19,7 @@ from omegaconf import DictConfig
 
 
 def sample_responses(cfg: DictConfig, checkpoint: str, prompts: list[dict]) -> list[dict]:
-    """Returns rows: {prompt_id, prompt, sample_idx, response, finished}."""
+    """Returns rows: {prompt_id, prompt, sample_idx, response, finished, stop_token_id}."""
     n = int(cfg.eval.samples_per_prompt)
     stops = _stop_ids(checkpoint)
     if bool(cfg.eval.use_vllm):
@@ -40,6 +41,18 @@ def _stop_ids(checkpoint: str) -> list[int]:
     from posttrain_lab.utils.chat import stop_token_ids
 
     return stop_token_ids(AutoTokenizer.from_pretrained(checkpoint), checkpoint)
+
+
+def vllm_stop_token(completion, stops: list[int]) -> int | None:
+    """The id a vLLM completion stopped on: stop_reason for a stop_token_ids
+    stop; an EOS stop leaves stop_reason None, so then the last generated id.
+    None if it did not stop (or stopped on something else)."""
+    if completion.finish_reason != "stop":
+        return None
+    if isinstance(completion.stop_reason, int):
+        return completion.stop_reason
+    ids = list(getattr(completion, "token_ids", None) or [])
+    return ids[-1] if ids and ids[-1] in stops else None
 
 
 def _report(rows: list[dict], cfg) -> None:
@@ -71,6 +84,7 @@ def _vllm_generate(cfg, checkpoint, prompts, n, stops):
                     "sample_idx": i,
                     "response": completion.text,
                     "finished": completion.finish_reason == "stop",
+                    "stop_token_id": vllm_stop_token(completion, stops),
                 }
             )
     return rows
@@ -123,6 +137,7 @@ def _hf_generate(cfg, checkpoint, prompts, n, stops):
                         "sample_idx": i,
                         "response": text,
                         "finished": cut is not None,
+                        "stop_token_id": ids[cut] if cut is not None else None,
                     }
                 )
     return rows
