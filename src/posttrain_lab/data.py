@@ -14,6 +14,14 @@ Loaders dispatch on ``cfg.dataset.format``:
 TRL 1.x consumes conversational formats directly, so loaders return message
 lists and let each trainer apply the tokenizer's chat template. All
 subsampling is deterministic in (dataset, split, seed, max_samples).
+
+Every split is loaded into memory (keep_in_memory=True), so map/filter/
+shuffle work in RAM instead of writing cache-*.arrow files next to the
+prepared dataset in HF_HOME. Under accelerate all ranks run these same maps
+at once and race on the same cache file (fatal on a CIFS/SMB PVC, where
+renaming onto a file another rank just created fails); a read-only or
+shared HF cache never gets written either. The splits are small enough
+(GSM8K 7.5k rows, UltraFeedback ~60k) to hold once per rank.
 """
 
 from __future__ import annotations
@@ -32,7 +40,7 @@ def _load_split(cfg: DictConfig, split: str, max_samples: int | None) -> Dataset
     kwargs = {}
     if cfg.dataset.get("config"):
         kwargs["name"] = str(cfg.dataset.config)
-    ds = load_dataset(cfg.dataset.id, split=split, **kwargs)
+    ds = load_dataset(cfg.dataset.id, split=split, keep_in_memory=True, **kwargs)
     return _subsample(cfg, ds, max_samples)
 
 
@@ -73,7 +81,7 @@ def pref_dataset(cfg: DictConfig, split: str | None = None) -> Dataset:
     gsm8k has no native preferences — run gen_pairs.py first.
     """
     if _format(cfg) == "pairs_disk" or (_format(cfg) == "gsm8k" and cfg.data.get("pairs_path")):
-        ds = load_from_disk(str(cfg.data.pairs_path))[split or str(cfg.data.get("split", "train"))]
+        ds = load_from_disk(str(cfg.data.pairs_path), keep_in_memory=True)[split or str(cfg.data.get("split", "train"))]
         return _subsample(cfg, ds, cfg.data.get("max_samples"))
 
     ds = _load_split(cfg, split or cfg.data.split, cfg.data.get("max_samples"))
