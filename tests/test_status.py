@@ -60,12 +60,42 @@ def test_errors_ignore_known_warnings() -> None:
 
 def test_last_section() -> None:
     text = "=== math m1: pi_SFT-math\nskip\n=== math m2: self-generated pairs\nsampling\n"
-    assert status.last_section(text) == ("=== math m2: self-generated pairs", "sampling\n")
-    assert status.last_section("no headers") == (None, "no headers")
+    assert status.last_section(text, "=== math ") == ("=== math m2: self-generated pairs", "sampling\n")
+    assert status.last_section("no headers") == (None, "")
+
+
+def test_last_section_of_a_both_tracks_log() -> None:
+    """run_all.sh: the helpful track's section ends where the math track starts."""
+    text = "=== stage 5: aggregate + figures\nALL DONE\n=== math m1: pi_SFT-math\nTraceback (most recent call last):\n"
+    assert status.last_section(text, "=== stage ") == ("=== stage 5: aggregate + figures", "ALL DONE")
+    assert status.last_section(text, "=== math ")[0] == "=== math m1: pi_SFT-math"
+    assert status.last_section("=== math m1: x\n", "=== stage ") == (None, "")
+
+
+def test_header_names() -> None:
+    math_plan, helpful_plan = status.launcher_plan("math", False), status.launcher_plan("helpful", False)
     stage = status.TRACKS["math"]["stages"][2]
-    assert status.header_names("=== math m3a: SFT arm", stage)
-    assert not status.header_names("=== math m3b: DPO sweep", stage)
-    assert status.header_names("=== stage 3a: SFT arm", status.TRACKS["helpful"]["stages"][2])
+    assert status.header_names("=== math m3a: SFT arm", stage, math_plan, False)
+    assert not status.header_names("=== math m3b: DPO sweep", stage, math_plan, False)
+    assert status.header_names("=== stage 3a: SFT arm", status.TRACKS["helpful"]["stages"][2], helpful_plan, False)
+    smoke = status.launcher_plan("math", True)
+    m1 = status.TRACKS["math"]["stages"][0]
+    assert status.header_names("=== smoke math 1/6: SFT base on gold CoT (pi_SFT-math)", m1, smoke, True)
+    assert not status.header_names("=== smoke math 2/6: self-generated preference pairs", m1, smoke, True)
+
+
+def test_launcher_plans_follow_the_scripts() -> None:
+    smoke = status.launcher_plan("math", True)
+    assert [(yaml, ovs) for _, yaml, ovs in smoke["steps"]] == [
+        ("math/m1_sft_gold.yaml", []), ("math/m2_gen_pairs.yaml", []),
+        ("math/m3_arm_dpo.yaml", ["train.beta=0.1"]), ("math/m3_arm_grpo.yaml", ["train.beta=0.04"])]
+    helpful = status.launcher_plan("helpful", True)
+    assert [ovs for _, _, ovs in helpful["steps"]] == [[], [], [], ["train.beta=0.1"], ["train.kl_coef=0.05"],
+                                                        ["train.beta=0.04"]]
+    assert status.launcher_plan("math", False)["analysis"] == [
+        "aggregate.py", "frontier_math.py", "diversity_plot.py", "retention_plot.py", "pref_logps_plot.py"]
+    assert "diagnostics.py" in status.launcher_plan("helpful", False)["analysis"]
+    assert set(status.launcher_plan("helpful", True)["analysis"]) == set(status.launcher_plan("helpful", False)["analysis"])
 
 
 def test_log_name_matches_the_launcher() -> None:
@@ -81,7 +111,7 @@ def test_parse_clock() -> None:
     assert status.parse_clock("?") is None
 
 
-def test_find_jobs_groups_launcher_and_ranks() -> None:
+def test_find_jobs_groups_launcher_and_ranks(monkeypatch) -> None:
     tail = "configs/math/m3_arm_dpo.yaml train.beta=0.1"
     procs = [
         {"pid": 10, "ppid": 1, "elapsed_s": 300, "cpu": 1.0,
@@ -92,6 +122,7 @@ def test_find_jobs_groups_launcher_and_ranks() -> None:
          "args": "/v/bin/python -m posttrain_lab.eval.run_eval task=math --shard 1/4"},
         {"pid": 30, "ppid": 1, "elapsed_s": 5, "cpu": 0.0, "args": "vim notes.txt"},
     ]
+    monkeypatch.setattr(status, "in_this_repo", lambda pid: True)
     jobs = {j.module: j for j in status.find_jobs(procs)}
     assert set(jobs) == {"train.dpo", "eval.run_eval"}
     dpo = jobs["train.dpo"]
@@ -251,7 +282,8 @@ def test_running_job_is_detected(repo, tmp_path: Path) -> None:
         " 40%|████      | 4/10 [01:00<01:30,  15.0s/it]\n"
         "{'loss': '0.65', 'rewards/accuracies': '0.62', 'rewards/margins': '0.11', 'epoch': '0.4'}\n")
     fake = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
-                             "-m", "posttrain_lab.train.dpo", "configs/math/m3_arm_dpo.yaml", "train.beta=0.3"])
+                             "-m", "posttrain_lab.train.dpo", "configs/math/m3_arm_dpo.yaml", "train.beta=0.3"],
+                            cwd=repo.root)  # launchers run jobs from the repo root
     try:
         run = repo.python("-m", "posttrain_lab.status", "math", "--json", check=False, **env)
     finally:
@@ -272,3 +304,127 @@ def test_sentinels_are_run_evals() -> None:
     from posttrain_lab.eval.groups import SENTINELS
 
     assert {name: keys for name, (keys, _) in run_eval.GROUPS.items()} == SENTINELS
+
+
+def test_only_this_repos_processes_count(repo, tmp_path: Path) -> None:
+    """A driver or job running from another checkout (or a command line that
+    only mentions a script) is not this repo's pipeline."""
+    import sys
+
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    procs = [subprocess.Popen(["bash", "-c", "sleep 120", "scripts/run_all_math.sh"], cwd=repo.root),  # not `bash script`
+             subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "-m", "posttrain_lab.train.dpo",
+                               "configs/math/m3_arm_dpo.yaml", "train.beta=0.3"], cwd=other)]
+    try:
+        run = repo.python("-m", "posttrain_lab.status", "math", "--json", check=False, RESULTS_DIR=str(tmp_path / "r"))
+    finally:
+        for proc in procs:
+            proc.kill()
+            proc.wait()
+    assert run.returncode == 0, run.stderr[-3000:]
+    report = json.loads(run.stdout)
+    assert report["tracks"][0]["driver"] is None
+    assert report["other_jobs"] == []
+    dpo = {r["override"]: r for s in report["tracks"][0]["stages"] if s["key"] == "m3b" for r in s["runs"]}
+    assert dpo["train.beta=0.3"]["state"] == "pending"
+
+
+def _touch(path: Path, mtime: float, text: str = "x") -> None:
+    import os
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    os.utime(path, (mtime, mtime))
+
+
+MATH_ROW = {"kl_k3": 0.1, "pass1": 0.3, "ppl_wikitext": 9.0, "harness": {}, "distinct_2": 0.5, "self_bleu": 0.2,
+            "logp_chosen": -50.0}
+MATH_OUTPUTS = ["figures/frontier_math.png", "figures/frontier_math.pdf", "figures/diversity.png",
+                "figures/retention.png", "figures/pref_logps.png"]
+
+
+def test_finished_smoke_run_reads_done(repo, tmp_path: Path) -> None:
+    """--smoke expects exactly what run_smoke.sh runs (one value per sweep, no
+    math SFT arm), so a finished smoke run is all DONE with nothing flagged."""
+    import time
+
+    math = tmp_path / "results" / "smoke" / "math"
+    t0 = time.time() - 100
+    for run in ("sft-base_seed17", "dpo_beta0.1_seed17", "grpo_beta0.04_seed17"):
+        for step in (5, 10):
+            _ckpt(math / "runs" / run, step, 10, loss=0.5)
+            _touch(math / "eval" / run / f"checkpoint-{step}.jsonl", t0, json.dumps(MATH_ROW) + "\n")
+        (math / "runs" / run / "DONE").touch()
+    pairs = math / "data" / "self_pairs_seed17"
+    pairs.mkdir(parents=True)
+    (pairs / "stats.json").write_text(json.dumps({"prompts": 100, "samples": 200, "sample_solve_rate": 0.065,
+                                                  "pairs": 13, "train_pairs": 12, "test_pairs": 1}))
+    (pairs / "DONE").touch()
+    _touch(math / "frontier.csv", t0 + 10)
+    for out in MATH_OUTPUTS:
+        _touch(math / out, t0 + 20)
+
+    run = repo.python("-m", "posttrain_lab.status", "math", "--smoke", "--json", check=False,
+                      RESULTS_DIR=str(tmp_path / "results"))
+    assert run.returncode == 0, run.stderr[-3000:]
+    report = json.loads(run.stdout)
+    stages = report["tracks"][0]["stages"]
+    assert [s["key"] for s in stages] == ["m1", "m2", "m3b", "m3d", "m4", "m5"]  # no m3a in smoke
+    assert {s["key"]: [r["override"] for r in s["runs"]] for s in stages if s["runs"]} == {
+        "m1": [None], "m2": [None], "m3b": ["train.beta=0.1"], "m3d": ["train.beta=0.04"]}
+    assert all(s["state"] == "done" for s in stages), [(s["key"], s["state"]) for s in stages]
+    assert report["attention"] == []
+
+
+def test_figures_need_every_output_newer_than_its_inputs(tmp_path: Path) -> None:
+    import time
+
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.create({"results_root": str(tmp_path)})
+    analysis = status.launcher_plan("math", False)["analysis"]
+    t0 = time.time() - 100
+    _touch(tmp_path / "eval" / "sft-base_seed17" / "checkpoint-72.jsonl", t0)
+    _touch(tmp_path / "frontier.csv", t0 + 10)
+    _touch(tmp_path / "figures" / "frontier_math.png", t0 + 20)  # one plot made, the rest failed
+    fig = status.figures_state(cfg, analysis)
+    assert "figures/retention.png" in fig["missing"] and fig["stale"] == []
+
+    for out in MATH_OUTPUTS:
+        _touch(tmp_path / out, t0 + 20)
+    assert status.figures_state(cfg, analysis)["missing"] == []
+    _touch(tmp_path / "figures" / "diversity.png", t0 + 5)  # left over from an earlier aggregate
+    assert status.figures_state(cfg, analysis)["stale"] == ["figures/diversity.png"]
+    _touch(tmp_path / "figures" / "diversity.png", t0 + 20)
+    _touch(tmp_path / "eval" / "sft_seed17" / "checkpoint-9.jsonl", t0 + 30)  # evaluated after the aggregate
+    assert status.figures_state(cfg, analysis)["stale"] == ["frontier.csv"]
+
+
+def test_figures_stage_not_done_with_a_missing_plot(repo, tmp_path: Path) -> None:
+    import time
+
+    _, env = _fake_run(repo, tmp_path)
+    t0 = time.time() + 10
+    math = tmp_path / "results" / "math"
+    _touch(math / "frontier.csv", t0)
+    _touch(math / "figures" / "frontier_math.png", t0 + 10)
+    run = repo.python("-m", "posttrain_lab.status", "math", "--json", check=False, **env)
+    report = json.loads(run.stdout)
+    m5 = [s for s in report["tracks"][0]["stages"] if s["key"] == "m5"][0]
+    assert m5["state"] == "stopped"
+    assert any("m5 figures incomplete: missing" in a and "retention.png" in a for a in report["attention"])
+
+
+def test_log_flag_applies_with_all_tracks(repo, tmp_path: Path) -> None:
+    """The default task is all; --log must still reach the track whose headers
+    the log carries, and only that track."""
+    _, env = _fake_run(repo, tmp_path)
+    (repo.root / "math-all.log").rename(repo.root / "custom.log")
+    run = repo.python("-m", "posttrain_lab.status", "--log", str(repo.root / "custom.log"), "--json", check=False, **env)
+    assert run.returncode == 0, run.stderr[-3000:]
+    math, helpful = json.loads(run.stdout)["tracks"]
+    assert math["driver_log"].endswith("custom.log") and math["log_stage"] == "=== math m3a: SFT arm"
+    arm = [s for s in math["stages"] if s["key"] == "m3a"][0]["runs"][0]
+    assert arm["state"] == "failed" and "OutOfMemoryError" in arm["errors"]["last_exception"]
+    assert helpful["driver_log"] is None
