@@ -181,6 +181,21 @@ the plan and asks you to type the track name first (`--yes` skips that). The
 HF cache, `.env`, other tracks' and smoke results, and MLflow runs are never
 touched.
 
+To redo a single arm after changing its config (e.g. the DPO learning rate),
+keep everything upstream and reset just that stage:
+
+```bash
+make reset TASK=math RESET_ARGS="--stage m3b --archive --relaunch"
+```
+
+`--stage` takes an arm (math `m3a`/`m3b`/`m3d`, helpful `3a`–`3d`). It removes
+only that arm's run dirs, their eval results and their per-run logs.
+`--archive` moves them to `<root>/archive/<timestamp>/`, where eval and the
+figures don't see them, which is handy to compare old and new. The relaunched
+`make <task>-all` skips every stage that is still DONE, trains the arm,
+evaluates just its checkpoints and rebuilds the figures. You type the stage
+key to confirm.
+
 ## Offline cluster (Hugging Face assets)
 
 The pipeline loads these from the Hub (`python scripts/prefetch_assets.py --list`):
