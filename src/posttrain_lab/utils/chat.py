@@ -217,10 +217,13 @@ def _cli(argv: list[str]) -> int:
             tag = ("low " if args.report_only else "FAIL") if low else "ok  "
             print(f"[stops] {tag} probe: P({result['token']}) where "
                   f"{result['n']} training answers end: mean {result['mean']:.3f} (min {result['min']:.3f}, "
-                  f"need >= {args.min_p})")
+                  f"need >= {args.min_p}); any stop token: {result['mean_any_stop']:.3f}")
             if low:
-                print(f"        {1 - result['mean']:.0%} of samples would not end the turn there: they run on "
-                      "into invented turns until max_new_tokens")
+                # gate on the end-of-turn token itself: GRPO rollouts stop and TRL masks only there
+                # (train/grpo.py); eval and pair sampling also stop at the other ids (mean_any_stop)
+                print(f"        {1 - result['mean']:.0%} of samples would not end the turn with {result['token']} "
+                      f"there (GRPO's only clean stop); {1 - result['mean_any_stop']:.0%} would not stop at all "
+                      "and run on into invented turns until max_new_tokens")
             bad += low and not args.report_only
     return 1 if bad else 0
 

@@ -341,6 +341,42 @@ def test_probe_gate(monkeypatch, tmp_path: Path, capsys, p_end: float, flags: li
     printed = capsys.readouterr().out
     assert ("run on into invented turns" in printed) == (p_end < chat.PROBE_MIN_P)
     assert "probe:" in printed and ("ok   probe:" in printed) == (p_end >= chat.PROBE_MIN_P)
+    assert "any stop token:" in printed
+
+
+def test_probe_counts_the_other_stop_ids_separately(monkeypatch, tmp_path: Path) -> None:
+    """<|endoftext|> also stops eval/pair sampling, not GRPO: the gate reads
+    P(<|im_end|>), the run-on estimate P(any stop)."""
+    import math
+
+    import transformers
+
+    ckpt = save_checkpoint(tmp_path / "ckpt", [IM_END, ENDOFTEXT], fixed=True)
+    serve_tokenizer(monkeypatch, fixed=True)
+    base = EndsAfterThere(0.5)
+
+    def call(ids):
+        out = base(ids)
+        out.logits[0, ids[0] == THERE, ENDOFTEXT] = math.log(0.3)
+        return out
+
+    monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained", lambda *a, **k: SimpleModel(call))
+    out = chat.end_of_turn_probe(ckpt, CONVERSATIONS)
+    assert out["mean_any_stop"] / out["mean"] == pytest.approx((0.5 + 0.3) / 0.5, rel=1e-3)
+
+
+class SimpleModel:
+    def __init__(self, fn):
+        self.fn = fn
+
+    def to(self, device):
+        return self
+
+    def eval(self):
+        return self
+
+    def __call__(self, ids):
+        return self.fn(ids)
 
 
 def test_sft_reinitializes_before_aligning_eos() -> None:
