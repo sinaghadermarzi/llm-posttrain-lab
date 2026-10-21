@@ -12,7 +12,7 @@ ROOT=$(python -m posttrain_lab.config --results-root helpful)  # RESULTS_DIR-awa
 echo "=== stage 1: pi_SFT"
 bash scripts/helpful/stage1_sft_base.sh
 # stop before the RL arms if generation would not stop at end of turn
-python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17"
+python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17" --probe configs/helpful/stage1_sft_base.yaml
 
 echo "=== stage 2: reward model (gated on pairwise accuracy)"
 bash scripts/helpful/stage2_rm.sh
