@@ -189,7 +189,11 @@ make reset TASK=math RESET_ARGS="--stage m3b --archive --relaunch"
 ```
 
 `--stage` takes an arm (math `m3a`/`m3b`/`m3d`, helpful `3a`–`3d`). It removes
-only that arm's run dirs, their eval results and their per-run logs.
+only that arm's run dirs, their eval results and their per-run logs. That
+includes old runs of the arm the config no longer names, such as a previous
+sweep grid or seed. It stops only that arm's own jobs, and refuses while
+anything else in the track is running (the driver, another arm, eval), so
+nothing else gets cut short.
 `--archive` moves them to `<root>/archive/<timestamp>/`, where eval and the
 figures don't see them, which is handy to compare old and new. The relaunched
 `make <task>-all` skips every stage that is still DONE, trains the arm,
