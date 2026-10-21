@@ -1,8 +1,9 @@
 """Start a track over: stop its jobs, clear its results and logs, optionally relaunch.
 
     python -m posttrain_lab.reset {math|helpful|all} [--smoke] [--archive]
-                                  [--relaunch] [--dry-run] [--yes]
+                                  [--stage KEY] [--relaunch] [--dry-run] [--yes]
     make reset TASK=math [RESET_ARGS="--relaunch"]     make reset-smoke
+    make reset TASK=math RESET_ARGS="--stage m3b --relaunch"   # redo one arm only
 
 In order:
 
@@ -19,6 +20,13 @@ In order:
   4. with --relaunch: start the GPU logger fresh (gpu_util.csv) and
      `nohup make <task>-all > <task>-all.log` (or `make smoke`), detached
 
+--stage KEY redoes one training arm (math m3a/m3b/m3d, helpful 3a-3d) and
+nothing upstream: step 2 removes only that arm's run dirs and their eval
+results (--archive moves them to <root>/archive/<timestamp>/ instead, where
+eval and the figures do not see them), step 3 only its per-run logs. The
+relaunched `make <task>-all` skips every stage still DONE, trains the arm,
+evaluates just its checkpoints and rebuilds the figures.
+
 It prints the whole plan first and asks you to type the track name before
 touching anything (--yes skips that, --dry-run only prints the plan). It
 never touches the HF model/dataset cache, .env, the other track's results,
@@ -34,11 +42,14 @@ import signal
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from omegaconf import OmegaConf
+
 from posttrain_lab import status
-from posttrain_lab.config import results_root
+from posttrain_lab.config import CONFIG_DIR, load_config, results_root
 from posttrain_lab.utils.dotenv import REPO_ROOT, results_dir
 
 # make targets (Makefile) that drive each track
@@ -49,6 +60,8 @@ MAKE_TARGETS = {
     "smoke": {"smoke"},
 }
 GPU_LOGGER = "nvidia-smi --query-gpu=timestamp"
+# --stage: arms whose outputs only feed eval and the figures (nothing trains from them)
+ARM_STAGES = {"math": ("m3a", "m3b", "m3d"), "helpful": ("3a", "3b", "3c", "3d")}
 
 
 def _tasks(task: str) -> list[str]:
@@ -192,11 +205,12 @@ def stop(pids: list[int], timeout: float) -> list[int]:
 # 2./3. what to remove
 
 
-def _root(task: str, smoke: bool) -> str:
+@contextmanager
+def _smoke_env(smoke: bool):
     prev = os.environ.get("SMOKE")
     os.environ["SMOKE"] = "1" if smoke else "0"
     try:
-        return results_root(task)
+        yield
     finally:
         if prev is None:
             os.environ.pop("SMOKE", None)
@@ -204,18 +218,60 @@ def _root(task: str, smoke: bool) -> str:
             os.environ["SMOKE"] = prev
 
 
+def _root(task: str, smoke: bool) -> str:
+    with _smoke_env(smoke):
+        return results_root(task)
+
+
+def _anchored(path) -> Path:  # the default 'results' is relative to the repo root
+    p = Path(str(path))
+    return (p if p.is_absolute() else REPO_ROOT / p).resolve()
+
+
 def safe_root(task: str, smoke: bool) -> Path:
     """The track's results root, refusing anything that is not
     <RESULTS_DIR>/<task> or <RESULTS_DIR>/smoke/<task>."""
-    def anchored(path: str) -> Path:  # the default 'results' is relative to the repo root
-        p = Path(path)
-        return (p if p.is_absolute() else REPO_ROOT / p).resolve()
-
-    root, base = anchored(_root(task, smoke)), anchored(results_dir())
+    root, base = _anchored(_root(task, smoke)), _anchored(results_dir())
     expected = (base / "smoke" / task) if smoke else (base / task)
     if root != expected or root == base:
         raise SystemExit(f"[reset] refusing: results root {root} is not {expected}")
     return root
+
+
+def find_stage(task: str, key: str) -> status.Stage:
+    for stage in status.TRACKS[task]["stages"]:
+        if stage.key == key:
+            return stage
+    raise SystemExit(f"[reset] no stage {key!r} in the {task} track")
+
+
+def stage_dirs(task: str, key: str) -> list[Path]:
+    """An arm's run dirs (one per sweep value) and their eval result dirs,
+    refusing anything outside <root>/runs and <root>/eval."""
+    stage = find_stage(task, key)
+    root = safe_root(task, False)
+    if stage.sweep:
+        grid = OmegaConf.load(CONFIG_DIR / task / "sweeps.yaml")[stage.sweep]
+        overrides = [[f"{k}={v}"] for k, vs in grid.items() for v in vs]
+    else:
+        overrides = [[]]
+    with _smoke_env(False):
+        eval_dir = _anchored(load_config("eval.yaml", [f"task={task}"]).eval.out_dir)
+        runs = [_anchored(load_config(stage.yaml, ov).output_dir) for ov in overrides]
+    out = []
+    for run in runs:
+        for path, parent in ((run, root / "runs"), (eval_dir / run.name, root / "eval")):
+            if path.parent != parent:
+                raise SystemExit(f"[reset] refusing: {path} is not under {parent}")
+            out.append(path)
+    return out
+
+
+def stage_logs(task: str, key: str) -> list[Path]:
+    stage = find_stage(task, key)
+    if not stage.log:
+        return []
+    return sorted(p for p in REPO_ROOT.glob(stage.log.replace("{ov}", "*")) if p.is_file())
 
 
 def track_logs(tasks: list[str], smoke: bool) -> list[Path]:
@@ -280,22 +336,26 @@ def relaunch(task: str, smoke: bool) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def plan(task: str, smoke: bool) -> dict:
+def plan(task: str, smoke: bool, stage: str | None = None) -> dict:
     tasks = _tasks(task)
     procs = status.list_processes()
     pids = track_processes(tasks, smoke, procs)
-    roots = [safe_root(t, smoke) for t in tasks]
+    roots = stage_dirs(task, stage) if stage else [safe_root(t, smoke) for t in tasks]
     others = {pid for pid in track_processes([t for t in status.TRACKS if t not in tasks] or [], smoke, procs)} \
         if task != "all" else set()
     return {
         "tasks": tasks, "smoke": smoke, "processes": pids,
         "roots": [(r, status.dir_size(r) if r.exists() else None) for r in roots],
-        "logs": track_logs(tasks, smoke), "hf_tmp": hf_tmp_files(), "other_running": sorted(others),
+        "logs": stage_logs(task, stage) if stage else track_logs(tasks, smoke), "hf_tmp": hf_tmp_files(),
+        "other_running": sorted(others), "stage": stage,
     }
 
 
 def show(pl: dict, archive: bool, do_relaunch: bool) -> None:
     label = " + ".join(pl["tasks"]) + (" (smoke)" if pl["smoke"] else "")
+    if pl.get("stage"):
+        stage = find_stage(pl["tasks"][0], pl["stage"])
+        label += f" {stage.key} ({stage.title} only: its runs and their eval results)"
     print(f"reset {label}   code {_commit()}")
     print("\n1. stop jobs")
     if pl["processes"]:
@@ -303,18 +363,23 @@ def show(pl: dict, archive: bool, do_relaunch: bool) -> None:
             print(f"   {pid:>7}  {why}")
     else:
         print("   nothing running for this track")
-    print(f"\n2. {'archive (rename)' if archive else 'DELETE'} results")
+    staged = bool(pl.get("stage"))
+    print(f"\n2. {('archive (move)' if staged else 'archive (rename)') if archive else 'DELETE'} results")
     for root, size in pl["roots"]:
         if size is None:
             print(f"   {root}  (does not exist)")
         else:
-            dest = f" -> {root.name}.<timestamp>" if archive else ""
+            dest = (f" -> {archive_dest(root, '<timestamp>')}" if staged else f" -> {root.name}.<timestamp>") \
+                if archive else ""
             print(f"   {root}  ({status.fmt_bytes(size)}){dest}")
     print(f"\n3. remove logs and dataset-cache leftovers (tmp* untouched for {STALE_TMP_S // 60} min)")
     for path in pl["logs"] + pl["hf_tmp"]:
         print(f"   {path}")
     if not pl["logs"] and not pl["hf_tmp"]:
         print("   none")
+    if staged:
+        print("\n   upstream stages, the other arms and their eval results stay; the figures are rebuilt when the "
+              "track runs again")
     if do_relaunch:
         print("\n4. relaunch: fresh GPU logger + detached make "
               + ("smoke" if pl["smoke"] else "all" if len(pl["tasks"]) > 1 else f"{pl['tasks'][0]}-all"))
@@ -332,8 +397,15 @@ def _commit() -> str:
         return "?"
 
 
+def archive_dest(path: Path, stamp: str) -> Path:
+    """--stage --archive: <root>/archive/<stamp>/<runs|eval>/<name>, out of
+    sight of eval's checkpoint discovery and the figures."""
+    return path.parent.parent / "archive" / stamp / path.parent.name / path.name
+
+
 def confirm(pl: dict) -> bool:
-    word = "smoke" if pl["smoke"] else pl["tasks"][0] if len(pl["tasks"]) == 1 else "all"
+    word = pl["stage"] if pl.get("stage") else "smoke" if pl["smoke"] else \
+        pl["tasks"][0] if len(pl["tasks"]) == 1 else "all"
     if not sys.stdin.isatty():
         print("\n[reset] not a terminal: re-run with --yes to confirm (or --dry-run to only look)")
         return False
@@ -374,7 +446,8 @@ def execute(pl: dict, archive: bool, timeout: float) -> bool:
         if not root.exists():
             print(f"   {root} does not exist")
         elif archive:
-            dest = root.with_name(f"{root.name}.{stamp}")
+            dest = archive_dest(root, stamp) if pl.get("stage") else root.with_name(f"{root.name}.{stamp}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
             root.rename(dest)
             print(f"   archived {root} -> {dest}")
         else:
@@ -393,13 +466,21 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("task", choices=["all", *status.TRACKS])
     parser.add_argument("--smoke", action="store_true", help="reset the smoke tree (<RESULTS_DIR>/smoke/<task>)")
     parser.add_argument("--archive", action="store_true", help="rename the results dir instead of deleting it")
+    parser.add_argument("--stage", metavar="KEY", help="redo one arm only (math m3a/m3b/m3d, helpful 3a-3d): "
+                        "its runs, their eval results and logs")
     parser.add_argument("--relaunch", action="store_true", help="start the GPU logger and the track again, detached")
     parser.add_argument("--dry-run", action="store_true", help="print the plan and exit")
     parser.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     parser.add_argument("--timeout", type=float, default=60.0, help="seconds to wait after SIGTERM (default 60)")
     args = parser.parse_args(argv)
+    if args.stage:
+        if args.task == "all" or args.smoke:
+            parser.error("--stage needs one track (math or helpful) and no --smoke")
+        if args.stage not in ARM_STAGES[args.task]:
+            parser.error(f"--stage {args.stage}: only an arm can be redone alone ({args.task}: "
+                         f"{', '.join(ARM_STAGES[args.task])}); later stages train from the others, reset the track")
 
-    pl = plan(args.task, args.smoke)
+    pl = plan(args.task, args.smoke, args.stage)
     show(pl, args.archive, args.relaunch)
     if args.dry_run:
         print("\n[reset] dry run: nothing changed")
