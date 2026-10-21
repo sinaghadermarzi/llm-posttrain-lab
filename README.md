@@ -291,6 +291,19 @@ tests/                    python -m pytest tests/ (CPU; the download test skips 
   stop right after π_SFT if `python -m posttrain_lab.utils.chat RUN_DIR`
   finds a checkpoint that would not stop. Runs from before this fix need
   retraining; `make status` flags them.
+- **Untrained chat-token embeddings** (base models): Qwen2.5 base never
+  trained `<|im_start|>` / `<|im_end|>`. Their (tied) embedding rows are
+  near-copies of ~2.8k other untrained rows (rare Thai and other tokens,
+  cosine ~0.99), so SFT pushing toward `<|im_end|>` lifts the whole crowd.
+  The second full math run's π_SFT gave `<|im_end|>` 0.12 where an answer ends,
+  and sampled a lookalike token (`#### 135รุ่ง`) the rest of the time. Those
+  samples then invent new questions until the cap (39% of pair samples, 41% of
+  rejected answers). SFT now re-initializes such rows first
+  (`train/common.py:init_untrained_chat_tokens`: `<|im_end|>` ← `<|endoftext|>`,
+  the rest ← mean row; a no-op on trained rows). `run_all_*.sh` then stop
+  after π_SFT unless `python -m posttrain_lab.utils.chat RUN_DIR --probe
+  STAGE_YAML` measures P(`<|im_end|>`) ≥ 0.8 where the training answers end
+  (written to `RUN_DIR/stop_probe.json`; `make status` shows it).
 - **TRL API drift**: PPOTrainer lives in `trl.experimental.ppo` (defensive
   import); pins in `requirements.txt` are load-bearing — bump trl+vllm as a
   pair and re-run `make smoke`.

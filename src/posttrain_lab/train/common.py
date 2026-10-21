@@ -59,6 +59,59 @@ def align_eos(model, tokenizer) -> None:
         gen.eos_token_id = [eos] + [i for i in old if i != eos]
 
 
+CROWD_COS = 0.95  # Qwen2.5 base: ~2.8k rows within this of <|im_end|>; trained tokens: none
+
+
+def untrained_rows(weight: torch.Tensor, ids: list[int], cos: float = CROWD_COS, min_twins: int = 8) -> list[int]:
+    """The ids whose embedding row is one of a crowd of near-identical rows:
+    tokens the base model never learned to tell apart. Qwen2.5 base leaves
+    <|im_start|>/<|im_end|> in such a crowd (with ~2.8k rare Thai and other
+    tokens, cosine ~0.99), so a trained push toward <|im_end|> lifts
+    the whole crowd and sampling picks a lookalike instead."""
+    w = torch.nn.functional.normalize(weight.detach().float(), dim=-1)
+    out = []
+    for i in ids:
+        twins = int((w @ w[i] >= cos).sum()) - 1
+        if twins >= min_twins:
+            out.append(i)
+    return out
+
+
+def init_untrained_chat_tokens(model, tokenizer, original_eos: int | None) -> list[str]:
+    """Give the chat template's special tokens a usable embedding before SFT,
+    if the base model never trained them (untrained_rows): the end-of-turn
+    token gets a copy of the original eos row (<|endoftext|>, what pretraining
+    predicts at the end of a document), the others the mean of the rows outside
+    the crowd. Trained rows (an -Instruct base, or a checkpoint this already
+    ran on) are left alone. Deterministic, so every rank makes the same
+    change. Returns the tokens re-initialized."""
+    from posttrain_lab.utils.chat import end_of_turn_token, template_token_ids
+
+    out_emb, in_emb = model.get_output_embeddings(), model.get_input_embeddings()
+    if out_emb is None or in_emb is None:
+        return []
+    ids = [i for i in template_token_ids(tokenizer) if i < out_emb.weight.shape[0]]
+    bad = untrained_rows(out_emb.weight, ids)
+    if not bad:
+        return []
+    eot = end_of_turn_token(tokenizer)
+    eot_id = tokenizer.convert_tokens_to_ids(eot) if eot else None
+    matrices = [in_emb.weight] + ([out_emb.weight] if out_emb.weight is not in_emb.weight else [])
+    source_ok = (original_eos is not None and original_eos != eot_id and original_eos not in bad
+                 and not untrained_rows(out_emb.weight, [original_eos]))
+    w = torch.nn.functional.normalize(out_emb.weight.detach().float(), dim=-1)
+    crowd = (w @ w[bad].T >= CROWD_COS).any(1)
+    with torch.no_grad():
+        for weight in matrices:
+            mean = weight[~crowd].float().mean(0).to(weight.dtype)
+            for i in bad:
+                weight[i] = weight[original_eos] if (i == eot_id and source_ok) else mean
+    names = tokenizer.convert_ids_to_tokens(bad)
+    print(f"[train] re-initialized untrained chat-template token embeddings: {', '.join(names)}"
+          + (f" ({eot} <- {tokenizer.convert_ids_to_tokens(original_eos)})" if eot_id in bad and source_ok else ""))
+    return names
+
+
 def model_kwargs(cfg: DictConfig) -> dict:
     return {
         "torch_dtype": getattr(torch, str(cfg.model.dtype)),
