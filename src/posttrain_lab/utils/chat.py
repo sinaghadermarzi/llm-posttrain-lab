@@ -214,7 +214,8 @@ def _cli(argv: list[str]) -> int:
             result["min_p"] = args.min_p
             (path / PROBE_FILE).write_text(json.dumps(result, indent=2) + "\n")
             low = result["mean"] < args.min_p
-            print(f"[stops] {'FAIL' if low and not args.report_only else 'ok  '} probe: P({result['token']}) where "
+            tag = ("low " if args.report_only else "FAIL") if low else "ok  "
+            print(f"[stops] {tag} probe: P({result['token']}) where "
                   f"{result['n']} training answers end: mean {result['mean']:.3f} (min {result['min']:.3f}, "
                   f"need >= {args.min_p})")
             if low:
