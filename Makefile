@@ -1,4 +1,4 @@
-.PHONY: preflight prefetch smoke all status gpu-log \
+.PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke \
 	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-grpo math-eval math-plots math-all
 
@@ -23,6 +23,18 @@ TASK ?= all
 STATUS_ARGS ?=
 status:
 	python -m posttrain_lab.status $(TASK) $(STATUS_ARGS)
+
+# start a track over: stop its jobs, delete (or --archive) its results and
+# logs, optionally --relaunch (README "Starting over"). Asks before deleting.
+# TASK must be given: make reset TASK=math RESET_ARGS="--relaunch"
+RESET_ARGS ?=
+reset:
+	@if [ "$(origin TASK)" != "command line" ] && [ "$(origin TASK)" != "environment" ]; then \
+		echo "make reset needs TASK=math|helpful|all (e.g. make reset TASK=math)"; exit 2; fi
+	python -m posttrain_lab.reset $(TASK) $(RESET_ARGS)
+
+reset-smoke:
+	python -m posttrain_lab.reset all --smoke $(RESET_ARGS)
 
 # sample every GPU each 30 s into gpu_util.csv (make status summarizes it);
 # stop with: pkill -f 'nvidia-smi --query-gpu=timestamp'
