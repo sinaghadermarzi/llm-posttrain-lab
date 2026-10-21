@@ -749,9 +749,10 @@ def stop_probe_state(run: Run, out: Path, stage_yaml: str, smoke: bool) -> None:
                          f"answers end: mean {probe['mean']:.3f}, min {probe.get('min', float('nan')):.3f} "
                          f"(gate >= {need})")
         if probe["mean"] < need and not smoke:
-            run.warnings.append(f"P(end of turn) is only {probe['mean']:.2f} where answers end: about "
-                                f"{1 - probe['mean']:.0%} of samples will run on into invented turns until "
-                                "max_new_tokens")
+            any_stop = probe.get("mean_any_stop", probe["mean"])
+            run.warnings.append(f"P(end of turn) is only {probe['mean']:.2f} where answers end (GRPO's only "
+                                f"clean stop); about {1 - any_stop:.0%} of samples will not stop at all and run "
+                                "on into invented turns until max_new_tokens")
     elif (out / DONE_MARKER).exists() and not smoke:
         run.warnings.append(f"no {PROBE_FILE} yet (run_all_*.sh writes it right after this stage); a run trained "
                             "before the probe existed likely has an untrained <|im_end|> embedding (retrain). "

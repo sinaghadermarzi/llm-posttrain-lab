@@ -501,10 +501,11 @@ def test_report_shows_the_stop_probe(repo, tmp_path: Path) -> None:
     assert "sft-base_seed17: no stop_probe.json yet" in attention
     assert "--probe configs/math/m1_sft_gold.yaml" in attention
 
-    probe = {"token": "<|im_end|>", "n": 64, "mean": 0.12, "min": 0.12, "max": 0.13, "min_p": 0.8}
+    probe = {"token": "<|im_end|>", "n": 64, "mean": 0.12, "min": 0.12, "max": 0.13, "mean_any_stop": 0.2,
+             "min_p": 0.8}
     (base / "stop_probe.json").write_text(json.dumps(probe))
     attention, notes = report()
-    assert "P(end of turn) is only 0.12 where answers end: about 88% of samples" in attention
+    assert "P(end of turn) is only 0.12 where answers end (GRPO's only clean stop); about 80% of samples" in attention
     assert "stops: P(<|im_end|>) where 64 training answers end: mean 0.120" in notes
 
     (base / "stop_probe.json").write_text(json.dumps({**probe, "mean": 0.97, "min": 0.9}))
