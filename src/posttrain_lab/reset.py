@@ -21,9 +21,12 @@ In order:
      `nohup make <task>-all > <task>-all.log` (or `make smoke`), detached
 
 --stage KEY redoes one training arm (math m3a/m3b/m3d, helpful 3a-3d) and
-nothing upstream: step 2 removes only that arm's run dirs and their eval
-results (--archive moves them to <root>/archive/<timestamp>/ instead, where
-eval and the figures do not see them), step 3 only its per-run logs. The
+nothing upstream: step 1 stops only that arm's jobs and refuses while
+anything else of the track runs (driver, another arm, eval); step 2 removes
+only that arm's run dirs, including ones the config no longer names (an old
+grid or seed), and their eval results (--archive moves them to
+<root>/archive/<timestamp>/ instead, where eval and the figures do not see
+them); step 3 only its per-run logs. The
 relaunched `make <task>-all` skips every stage still DONE, trains the arm,
 evaluates just its checkpoints and rebuilds the figures.
 
@@ -37,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -245,9 +249,21 @@ def find_stage(task: str, key: str) -> status.Stage:
     raise SystemExit(f"[reset] no stage {key!r} in the {task} track")
 
 
+def run_name_pattern(stage_yaml: str) -> re.Pattern:
+    """The arm's run-dir names whatever the sweep values or seed: its
+    output_dir template's last part with every ${...} as a wildcard
+    (dpo_beta${train.beta}_seed${seed} -> dpo_beta.+_seed.+)."""
+    template = str(OmegaConf.to_container(OmegaConf.load(CONFIG_DIR / stage_yaml), resolve=False)["output_dir"])
+    name = template.rstrip("/").rsplit("/", 1)[-1]
+    parts = re.split(r"\$\{[^}]*\}", name)
+    return re.compile("".join(re.escape(x) + ".+" for x in parts[:-1]) + re.escape(parts[-1]))
+
+
 def stage_dirs(task: str, key: str) -> list[Path]:
-    """An arm's run dirs (one per sweep value) and their eval result dirs,
-    refusing anything outside <root>/runs and <root>/eval."""
+    """An arm's run dirs and their eval result dirs: the configured runs (one
+    per sweep value) plus any existing dir of that arm the config no longer
+    names (an old grid, another seed), which eval would otherwise still pick
+    up. Refuses anything outside <root>/runs and <root>/eval."""
     stage = find_stage(task, key)
     root = safe_root(task, False)
     if stage.sweep:
@@ -258,13 +274,41 @@ def stage_dirs(task: str, key: str) -> list[Path]:
     with _smoke_env(False):
         eval_dir = _anchored(load_config("eval.yaml", [f"task={task}"]).eval.out_dir)
         runs = [_anchored(load_config(stage.yaml, ov).output_dir) for ov in overrides]
+    names = {run.name for run in runs}
+    pattern = run_name_pattern(stage.yaml)
+    for parent in (root / "runs", eval_dir):
+        if parent.is_dir():
+            names |= {d.name for d in parent.iterdir() if d.is_dir() and pattern.fullmatch(d.name)}
     out = []
-    for run in runs:
-        for path, parent in ((run, root / "runs"), (eval_dir / run.name, root / "eval")):
+    for name in sorted(names):
+        for path, parent in ((root / "runs" / name, root / "runs"), (eval_dir / name, root / "eval")):
             if path.parent != parent:
                 raise SystemExit(f"[reset] refusing: {path} is not under {parent}")
             out.append(path)
+    for run in runs:
+        if run.parent != root / "runs":
+            raise SystemExit(f"[reset] refusing: {run} is not under {root / 'runs'}")
     return out
+
+
+def stage_processes(task: str, dirs: list[Path], procs: list[dict] | None = None) -> tuple[dict, dict]:
+    """(this arm's jobs and their children, every other process of the track).
+    A stage reset stops only the first; while any of the second runs (the
+    driver, another arm, eval) it refuses, so nothing else is cut short."""
+    procs = status.list_processes() if procs is None else procs
+    everything = track_processes([task], False, procs)
+    runs = {str(d) for d in dirs if d.parent.name == "runs"}
+    roots: dict[int, str] = {}
+    for job in status.find_jobs(procs):
+        if job.smoke or job.module == "eval.run_eval":
+            continue
+        out = status.job_output_dir(job)
+        if out is not None and str(_anchored(out)) in runs:
+            for pid in job.pids:
+                roots[pid] = f"posttrain_lab.{job.module} {' '.join(job.args)}"
+    arm = {pid: everything.get(pid) or roots.get(pid, "child") for pid in _descendants(set(roots), procs)
+           if pid in everything or pid in roots}
+    return arm, {pid: why for pid, why in everything.items() if pid not in arm}
 
 
 def stage_logs(task: str, key: str) -> list[Path]:
@@ -339,15 +383,19 @@ def relaunch(task: str, smoke: bool) -> list[str]:
 def plan(task: str, smoke: bool, stage: str | None = None) -> dict:
     tasks = _tasks(task)
     procs = status.list_processes()
-    pids = track_processes(tasks, smoke, procs)
     roots = stage_dirs(task, stage) if stage else [safe_root(t, smoke) for t in tasks]
+    blocking: dict[int, str] = {}
+    if stage:
+        pids, blocking = stage_processes(task, roots, procs)
+    else:
+        pids = track_processes(tasks, smoke, procs)
     others = {pid for pid in track_processes([t for t in status.TRACKS if t not in tasks] or [], smoke, procs)} \
         if task != "all" else set()
     return {
         "tasks": tasks, "smoke": smoke, "processes": pids,
         "roots": [(r, status.dir_size(r) if r.exists() else None) for r in roots],
         "logs": stage_logs(task, stage) if stage else track_logs(tasks, smoke), "hf_tmp": hf_tmp_files(),
-        "other_running": sorted(others), "stage": stage,
+        "other_running": sorted(others), "stage": stage, "blocking": blocking,
     }
 
 
@@ -362,7 +410,11 @@ def show(pl: dict, archive: bool, do_relaunch: bool) -> None:
         for pid, why in sorted(pl["processes"].items()):
             print(f"   {pid:>7}  {why}")
     else:
-        print("   nothing running for this track")
+        print("   nothing running for this " + ("arm" if pl.get("stage") else "track"))
+    if pl.get("blocking"):
+        print("   still running in the track, NOT this arm (a stage reset will not stop these):")
+        for pid, why in sorted(pl["blocking"].items()):
+            print(f"   {pid:>7}  {why}")
     staged = bool(pl.get("stage"))
     print(f"\n2. {('archive (move)' if staged else 'archive (rename)') if archive else 'DELETE'} results")
     for root, size in pl["roots"]:
@@ -413,13 +465,14 @@ def confirm(pl: dict) -> bool:
     return answer == word
 
 
-def stop_until_quiet(tasks: list[str], smoke: bool, timeout: float, rounds: int = 5) -> list[int]:
+def stop_until_quiet(tasks: list[str], smoke: bool, timeout: float, rounds: int = 5, scan=None) -> list[int]:
     """Re-scan the track's processes and stop them until a scan finds none:
     the plan was printed before the confirmation prompt, and a driver may
     have started a new job since. Returns what is still running (empty: quiet)."""
+    scan = scan or (lambda: track_processes(tasks, smoke))
     stopped = 0
     for _ in range(rounds):
-        found = track_processes(tasks, smoke)
+        found = scan()
         if not found:
             print(f"   stopped {stopped} process(es)" if stopped else "   nothing to stop")
             return []
@@ -430,12 +483,26 @@ def stop_until_quiet(tasks: list[str], smoke: bool, timeout: float, rounds: int 
             return survivors
         stopped += len(found)
         time.sleep(1.0)  # let a dying driver's last spawn show up in the next scan
-    return sorted(track_processes(tasks, smoke))
+    return sorted(scan())
+
+
+BLOCKED = ("[reset] refusing --stage while other jobs of the track run (listed above): wait for them to finish, "
+           "or start the whole track over with: make reset TASK={task}")
 
 
 def execute(pl: dict, archive: bool, timeout: float) -> bool:
     print("\n== stopping jobs")
-    survivors = stop_until_quiet(pl["tasks"], pl["smoke"], timeout)
+    if pl.get("stage"):
+        task, dirs = pl["tasks"][0], [root for root, _ in pl["roots"]]
+        if stage_processes(task, dirs)[1]:  # re-check: the plan was printed before the prompt
+            print(BLOCKED.format(task=task) + "; nothing changed")
+            return False
+        survivors = stop_until_quiet(pl["tasks"], False, timeout, scan=lambda: stage_processes(task, dirs)[0])
+        if not survivors and stage_processes(task, dirs)[1]:
+            print(BLOCKED.format(task=task) + "; nothing deleted")
+            return False
+    else:
+        survivors = stop_until_quiet(pl["tasks"], pl["smoke"], timeout)
     if survivors:
         print(f"[reset] ABORT: still running: {survivors}; nothing deleted")
         return False
@@ -482,6 +549,9 @@ def main(argv: list[str] | None = None) -> None:
 
     pl = plan(args.task, args.smoke, args.stage)
     show(pl, args.archive, args.relaunch)
+    if pl["blocking"] and not args.dry_run:
+        print("\n" + BLOCKED.format(task=args.task))
+        sys.exit(1)
     if args.dry_run:
         print("\n[reset] dry run: nothing changed")
         return
