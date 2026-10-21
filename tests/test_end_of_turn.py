@@ -216,4 +216,132 @@ def test_launchers_gate_on_the_base_sft(script: str) -> None:
     sft = text.index("_sft_base.sh" if "helpful" in script else "m1_sft_gold.sh")
     gate = text.index('python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17"')
     assert sft < gate < text.index("=== ", sft)  # right after pi_SFT, before the next stage
+    yaml = "configs/helpful/stage1_sft_base.yaml" if "helpful" in script else "configs/math/m1_sft_gold.yaml"
+    assert text[gate:].splitlines()[0].endswith(f"--probe {yaml}")  # and it measures, not only reads config
 
+
+
+# --- untrained chat-token embeddings (the second full math run) -------------
+
+
+def crowded_model(tied: bool):
+    """Qwen2.5 base's state: <|im_start|>/<|im_end|> sit in a crowd of
+    near-identical untrained rows (here: every row past the vocab)."""
+    import torch
+    from transformers import Qwen2Config, Qwen2ForCausalLM
+
+    torch.manual_seed(0)
+    cfg = Qwen2Config(vocab_size=64, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
+                      num_attention_heads=2, num_key_value_heads=1, max_position_embeddings=64,
+                      eos_token_id=ENDOFTEXT, pad_token_id=ENDOFTEXT, tie_word_embeddings=tied)
+    model = Qwen2ForCausalLM(cfg).eval()
+    crowd = torch.randn(16)
+    with torch.no_grad():
+        for emb in {id(e): e for e in (model.get_input_embeddings(), model.get_output_embeddings())}.values():
+            for i in [IM_START, IM_END] + list(range(len(WORDS) + 3, 64)):
+                emb.weight[i] = crowd + 0.01 * torch.randn(16)
+    return model
+
+
+def test_template_token_ids() -> None:
+    assert chat.template_token_ids(qwen_like_tokenizer()) == [IM_START, IM_END]
+    assert chat.template_token_ids(qwen_like_tokenizer(template=None)) == []
+
+
+@pytest.mark.parametrize("tied", [True, False])
+def test_untrained_chat_tokens_are_reinitialized(tied: bool) -> None:
+    import torch
+
+    from posttrain_lab.train.common import init_untrained_chat_tokens, untrained_rows
+
+    model, tok = crowded_model(tied), chat.use_end_of_turn_eos(qwen_like_tokenizer())
+    out = model.get_output_embeddings().weight
+    before = out.detach().clone()
+    assert untrained_rows(out, [IM_START, IM_END, ENDOFTEXT, HI]) == [IM_START, IM_END]
+
+    assert init_untrained_chat_tokens(model, tok, ENDOFTEXT) == ["<|im_start|>", "<|im_end|>"]
+    for emb in (model.get_input_embeddings().weight, out):
+        assert torch.equal(emb[IM_END], emb[ENDOFTEXT])      # end of turn <- end of document
+    assert torch.allclose(out[IM_START], before[:IM_START].mean(0))  # the rest <- mean of the trained rows
+    keep = [i for i in range(64) if i not in (IM_START, IM_END)]
+    assert torch.equal(out[keep], before[keep])                # nothing else moves
+    assert untrained_rows(out, [IM_START, IM_END]) == []
+    assert init_untrained_chat_tokens(model, tok, ENDOFTEXT) == []  # trained now: a no-op
+
+
+def test_trained_chat_tokens_are_left_alone() -> None:
+    import torch
+
+    from posttrain_lab.train.common import init_untrained_chat_tokens
+
+    model = tiny_model()  # random rows: no crowd (an -Instruct base, or pi_SFT)
+    before = model.get_output_embeddings().weight.detach().clone()
+    assert init_untrained_chat_tokens(model, chat.use_end_of_turn_eos(qwen_like_tokenizer()), ENDOFTEXT) == []
+    assert torch.equal(model.get_output_embeddings().weight, before)
+
+
+class EndsAfterThere:
+    """A stand-in model: puts p_end on <|im_end|> right after the token
+    'there' and almost nothing anywhere else, so the probe must read exactly
+    the position where the answer ends."""
+
+    def __init__(self, p_end: float):
+        self.p_end = p_end
+
+    def to(self, device):
+        return self
+
+    def eval(self):
+        return self
+
+    def __call__(self, ids):
+        import math
+        from types import SimpleNamespace
+
+        import torch
+
+        logits = torch.zeros(1, ids.shape[1], 64)
+        rest = math.log((1 - self.p_end) / 63)
+        logits[0, :, :] = rest
+        logits[0, :, IM_END] = math.log(1e-6)
+        logits[0, ids[0] == THERE, IM_END] = math.log(self.p_end)
+        return SimpleNamespace(logits=logits)
+
+
+def serve_model(monkeypatch, p_end: float) -> None:
+    import transformers
+
+    monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained",
+                        lambda *a, **k: EndsAfterThere(p_end))
+
+
+CONVERSATIONS = [[{"role": "user", "content": "q"}, {"role": "assistant", "content": "hi there"}],
+                 [{"role": "user", "content": "q"}, {"role": "assistant", "content": "x"},
+                  {"role": "user", "content": "q"}, {"role": "assistant", "content": "a hi there"}]]
+
+
+def test_probe_reads_where_the_answer_ends(monkeypatch, tmp_path: Path) -> None:
+    ckpt = save_checkpoint(tmp_path / "ckpt", [IM_END, ENDOFTEXT], fixed=True)
+    serve_tokenizer(monkeypatch, fixed=True)
+    serve_model(monkeypatch, 0.9)
+    out = chat.end_of_turn_probe(ckpt, CONVERSATIONS)
+    assert out["token"] == "<|im_end|>" and out["n"] == 2
+    assert out["mean"] == pytest.approx(0.9, abs=1e-4) and out["min"] == pytest.approx(0.9, abs=1e-4)
+
+
+@pytest.mark.parametrize("p_end, flags, code", [(0.95, [], 0), (0.12, [], 1), (0.12, ["--report-only"], 0)])
+def test_probe_gate(monkeypatch, tmp_path: Path, capsys, p_end: float, flags: list[str], code: int) -> None:
+    ckpt = save_checkpoint(tmp_path / "ckpt", [IM_END, ENDOFTEXT], fixed=True)
+    serve_tokenizer(monkeypatch, fixed=True)
+    serve_model(monkeypatch, p_end)
+    monkeypatch.setattr(chat, "probe_conversations", lambda stage_yaml, n=64: CONVERSATIONS)
+    assert chat._cli([str(ckpt), "--probe", "math/m1_sft_gold.yaml", *flags]) == code
+    saved = json.loads((ckpt / chat.PROBE_FILE).read_text())
+    assert saved["mean"] == pytest.approx(p_end, abs=1e-4) and saved["min_p"] == chat.PROBE_MIN_P
+    printed = capsys.readouterr().out
+    assert ("run on into invented turns" in printed) == (p_end < chat.PROBE_MIN_P)
+
+
+def test_sft_reinitializes_before_aligning_eos() -> None:
+    text = (Path(__file__).resolve().parents[1] / "src" / "posttrain_lab" / "train" / "sft.py").read_text()
+    assert text.index("init_untrained_chat_tokens(model") < text.index("align_eos(model")

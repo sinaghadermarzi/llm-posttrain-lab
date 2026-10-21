@@ -9,7 +9,7 @@ ROOT=$(python -m posttrain_lab.config --results-root math)  # RESULTS_DIR-aware
 echo "=== math m1: pi_SFT-math (gold CoT)"
 bash scripts/math/m1_sft_gold.sh
 # stop before hours of sampling if generation would not stop at end of turn
-python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17"
+python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17" --probe configs/math/m1_sft_gold.yaml
 
 echo "=== math m2: self-generated preference pairs"
 bash scripts/math/m2_gen_pairs.sh
