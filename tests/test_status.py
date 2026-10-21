@@ -483,3 +483,30 @@ def test_report_flags_runs_that_cannot_stop(repo, tmp_path: Path) -> None:
     attention = "\n".join(json.loads(run.stdout)["attention"])
     assert "sft-base_seed17: saved tokenizer's eos '<|endoftext|>' never appears in its chat template" in attention
     assert "most samples of sft-base_seed17 hit max_new_tokens" in attention
+
+
+def test_report_shows_the_stop_probe(repo, tmp_path: Path) -> None:
+    """Base SFT without a stop probe, with a failing one, and with a passing one."""
+    _, env = _fake_run(repo, tmp_path)
+    base = tmp_path / "results" / "math" / "runs" / "sft-base_seed17"
+
+    def report() -> tuple[str, str]:
+        run = repo.python("-m", "posttrain_lab.status", "math", "--json", check=False, **env)
+        assert run.returncode == 0, run.stderr[-3000:]
+        rep = json.loads(run.stdout)
+        (m1,) = [s for s in rep["tracks"][0]["stages"] if s["key"] == "m1"]
+        return "\n".join(rep["attention"]), "\n".join(m1["runs"][0]["notes"])
+
+    attention, _ = report()
+    assert "sft-base_seed17: no stop_probe.json yet" in attention
+    assert "--probe configs/math/m1_sft_gold.yaml" in attention
+
+    probe = {"token": "<|im_end|>", "n": 64, "mean": 0.12, "min": 0.12, "max": 0.13, "min_p": 0.8}
+    (base / "stop_probe.json").write_text(json.dumps(probe))
+    attention, notes = report()
+    assert "P(end of turn) is only 0.12 where answers end: about 88% of samples" in attention
+    assert "stops: P(<|im_end|>) where 64 training answers end: mean 0.120" in notes
+
+    (base / "stop_probe.json").write_text(json.dumps({**probe, "mean": 0.97, "min": 0.9}))
+    attention, notes = report()
+    assert "sft-base_seed17: " not in attention and "mean 0.970" in notes

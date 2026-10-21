@@ -45,6 +45,7 @@ from omegaconf import OmegaConf
 
 from posttrain_lab.config import CONFIG_DIR, load_config
 from posttrain_lab.eval.groups import SENTINELS
+from posttrain_lab.utils.chat import PROBE_FILE, PROBE_MIN_P
 from posttrain_lab.utils.checkpoints import DONE_MARKER, discover_all_checkpoints
 from posttrain_lab.utils.dotenv import REPO_ROOT, results_dir, results_dir_source
 
@@ -734,6 +735,29 @@ def stop_config_problem(run_dir: Path) -> str | None:
     return None
 
 
+# base-SFT stages whose launcher gates on `utils.chat --probe` (run_all_*.sh)
+PROBED_STAGES = {"math/m1_sft_gold.yaml", "helpful/stage1_sft_base.yaml"}
+
+
+def stop_probe_state(run: Run, out: Path, stage_yaml: str, smoke: bool) -> None:
+    """The stop probe the launcher ran after base SFT (utils/chat.py): how
+    likely pi_SFT is to end the turn where its training answers end."""
+    probe = read_json(out / PROBE_FILE)
+    if probe and isinstance(probe.get("mean"), (int, float)):
+        need = probe.get("min_p", PROBE_MIN_P)
+        run.notes.append(f"stops: P({probe.get('token', 'end of turn')}) where {probe.get('n', '?')} training "
+                         f"answers end: mean {probe['mean']:.3f}, min {probe.get('min', float('nan')):.3f} "
+                         f"(gate >= {need})")
+        if probe["mean"] < need and not smoke:
+            run.warnings.append(f"P(end of turn) is only {probe['mean']:.2f} where answers end: about "
+                                f"{1 - probe['mean']:.0%} of samples will run on into invented turns until "
+                                "max_new_tokens")
+    elif (out / DONE_MARKER).exists() and not smoke:
+        run.warnings.append(f"no {PROBE_FILE} yet (run_all_*.sh writes it right after this stage); a run trained "
+                            "before the probe existed likely has an untrained <|im_end|> embedding (retrain). "
+                            f"Check: python -m posttrain_lab.utils.chat {out} --probe configs/{stage_yaml}")
+
+
 def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, Job],
                 driver_section: list[str] | None, driver_log: Path | None) -> Run:
     out = Path(str(cfg.output_dir))
@@ -757,6 +781,8 @@ def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, 
         problem = stop_config_problem(saved) if saved is not None and stage.kind in ("train", "rm") else None
         if problem:
             run.warnings.append(problem)
+        if stage.yaml in PROBED_STAGES:
+            stop_probe_state(run, out, stage.yaml, bool(cfg.get("smoke")))
 
     done = (out / DONE_MARKER).exists()
     if done:

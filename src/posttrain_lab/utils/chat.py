@@ -18,6 +18,13 @@ that tail). So:
   - `python -m posttrain_lab.utils.chat RUN_DIR...` checks saved runs and
     exits nonzero if one would not stop at end of turn (run_smoke.sh gates on it).
 
+Pointing eos at <|im_end|> is not enough on its own: Qwen2.5 base never
+trained the <|im_start|>/<|im_end|> embeddings, so pi_SFT still gave
+<|im_end|> only 0.12 where a turn ends (the second full math run). SFT now
+re-initializes them first (train/common.py:init_untrained_chat_tokens), and
+`--probe STAGE_YAML` measures the probability on the training data after
+base SFT (run_all_*.sh gate on it; status shows it).
+
 Kept free of torch so posttrain_lab.status can import it.
 """
 
@@ -49,6 +56,23 @@ def end_of_turn_token(tokenizer) -> str | None:
         if token and after.startswith(token):
             return token
     return None
+
+
+def template_token_ids(tokenizer) -> list[int]:
+    """The special/added tokens the chat template writes around a turn
+    (<|im_start|>, <|im_end|> for Qwen)."""
+    if not getattr(tokenizer, "chat_template", None):
+        return []
+    try:
+        ids = tokenizer.apply_chat_template(
+            [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}], tokenize=True
+        )
+    except Exception:
+        return []
+    if isinstance(ids, dict) or hasattr(ids, "input_ids"):
+        ids = ids["input_ids"]
+    specials = set(tokenizer.all_special_ids) | set(tokenizer.get_added_vocab().values())
+    return sorted({int(i) for i in ids if int(i) in specials})
 
 
 def use_end_of_turn_eos(tokenizer):
@@ -105,11 +129,74 @@ def stop_problems(checkpoint: str | Path) -> list[str]:
     return problems
 
 
+PROBE_FILE = "stop_probe.json"
+PROBE_MIN_P = 0.8
+
+
+def probe_conversations(stage_yaml: str, n: int = 64) -> list[list[dict]]:
+    """The first n training conversations of a stage (ending in an assistant
+    turn): what pi_SFT was just trained to end."""
+    from posttrain_lab.config import load_config
+    from posttrain_lab.data import sft_dataset
+
+    cfg = load_config(stage_yaml, [f"data.max_samples={n}"])
+    rows = [list(m) for m in sft_dataset(cfg)["messages"]]
+    return [m for m in rows if m and m[-1]["role"] == "assistant"][:n]
+
+
+def end_of_turn_probe(checkpoint: str | Path, conversations: list[list[dict]], max_tokens: int = 2048) -> dict:
+    """How likely the saved model is to emit the end-of-turn token right where
+    each conversation's last assistant turn ends. A model that has learned to
+    stop puts nearly all its mass there; the first full math run's pi_SFT put
+    0.12 (untrained <|im_end|> embedding, train/common.py:untrained_rows), so
+    most samples ran on into invented turns."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(str(checkpoint))
+    eot = end_of_turn_token(tokenizer)
+    if eot is None:
+        return {}
+    eot_id = tokenizer.convert_tokens_to_ids(eot)
+    stops = stop_token_ids(tokenizer, checkpoint)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForCausalLM.from_pretrained(
+        str(checkpoint), dtype=torch.bfloat16 if device == "cuda" else torch.float32
+    ).to(device).eval()
+    p_eot, p_stop = [], []
+    for messages in conversations:
+        text = tokenizer.apply_chat_template(messages, tokenize=False)
+        cut = text.rfind(eot)
+        if cut < 0:
+            continue
+        ids = tokenizer(text[:cut], add_special_tokens=False, return_tensors="pt").input_ids[:, -max_tokens:]
+        with torch.no_grad():
+            probs = model(ids.to(device)).logits[0, -1].float().softmax(-1)
+        p_eot.append(probs[eot_id].item())
+        p_stop.append(probs[stops].sum().item())
+    if not p_eot:
+        return {}
+    return {"token": eot, "n": len(p_eot), "mean": sum(p_eot) / len(p_eot), "min": min(p_eot),
+            "max": max(p_eot), "mean_any_stop": sum(p_stop) / len(p_stop)}
+
+
 def _cli(argv: list[str]) -> int:
-    """python -m posttrain_lab.utils.chat RUN_DIR... : nonzero if any saved run
-    (its tokenizer + generation_config) would not stop at end of turn."""
+    """python -m posttrain_lab.utils.chat RUN_DIR... [--probe STAGE_YAML] :
+    nonzero if any saved run (its tokenizer + generation_config) would not
+    stop at end of turn. --probe also measures it (end_of_turn_probe) on the
+    stage's training conversations, writes RUN_DIR/stop_probe.json, and fails
+    below --min-p unless --report-only (smoke: a few steps cannot learn it)."""
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="python -m posttrain_lab.utils.chat")
+    ap.add_argument("runs", nargs="+")
+    ap.add_argument("--probe", metavar="STAGE_YAML", help="measure P(end of turn) on this stage's training data")
+    ap.add_argument("--min-p", type=float, default=PROBE_MIN_P)
+    ap.add_argument("--report-only", action="store_true", help="print the probe, never fail on it")
+    args = ap.parse_args(argv)
+    conversations = None
     bad = 0
-    for arg in argv:
+    for arg in args.runs:
         path = Path(arg)
         if not (path / "tokenizer_config.json").exists():
             continue  # not a saved model dir (e.g. the pairs dataset)
@@ -118,6 +205,22 @@ def _cli(argv: list[str]) -> int:
         for p in problems:
             print(f"        {p}")
         bad += bool(problems)
+        if args.probe:
+            if conversations is None:
+                conversations = probe_conversations(args.probe)
+            result = end_of_turn_probe(path, conversations)
+            if not result:
+                continue
+            result["min_p"] = args.min_p
+            (path / PROBE_FILE).write_text(json.dumps(result, indent=2) + "\n")
+            low = result["mean"] < args.min_p
+            print(f"[stops] {'FAIL' if low and not args.report_only else 'ok  '} probe: P({result['token']}) where "
+                  f"{result['n']} training answers end: mean {result['mean']:.3f} (min {result['min']:.3f}, "
+                  f"need >= {args.min_p})")
+            if low:
+                print(f"        {1 - result['mean']:.0%} of samples would not end the turn there: they run on "
+                      "into invented turns until max_new_tokens")
+            bad += low and not args.report_only
     return 1 if bad else 0
 
 
