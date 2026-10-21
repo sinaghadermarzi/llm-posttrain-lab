@@ -340,6 +340,7 @@ def test_probe_gate(monkeypatch, tmp_path: Path, capsys, p_end: float, flags: li
     assert saved["mean"] == pytest.approx(p_end, abs=1e-4) and saved["min_p"] == chat.PROBE_MIN_P
     printed = capsys.readouterr().out
     assert ("run on into invented turns" in printed) == (p_end < chat.PROBE_MIN_P)
+    assert "probe:" in printed and ("ok   probe:" in printed) == (p_end >= chat.PROBE_MIN_P)
 
 
 def test_sft_reinitializes_before_aligning_eos() -> None:
