@@ -2,8 +2,10 @@
 
   dpo_logps.png    — DPO's chosen AND rejected log-probs during training (the
                      "squeezing effect": both often decline; DPO moves mass off
-                     the whole preference distribution, unlike RL). Read from
-                     the trainer_state.json log history in each DPO run.
+                     the whole preference distribution, unlike RL), one panel
+                     per DPO-trained arm (DPO, DPO + NLL: the NLL term should
+                     hold the chosen line up). Read from the
+                     trainer_state.json log history in each run.
   diagnostics.png  — 3 panels against KL: response length (length hacking),
                      policy token entropy (mode collapse), and the
                      train-RM-minus-judge z-gap (reward hacking).
@@ -22,15 +24,29 @@ import pandas as pd
 
 from paths import default_root  # also puts src/ on sys.path
 from posttrain_lab.utils.checkpoints import list_checkpoints
-from style import BLUE_RAMP, INK, METHOD_COLORS, apply_style
+from style import BLUE_RAMP, INK, KL_COL, METHOD_COLORS, METHOD_LABELS, apply_style, kl_axis, marker_for
+
+
+DPO_ARMS = ["dpo", "dpo-nll"]  # arms trained by train/dpo.py (run dirs <arm>_beta*_seed*)
 
 
 def dpo_logp_trajectories(results_root: Path, out_dir: Path) -> None:
-    runs = sorted(results_root.glob("runs/dpo_*_seed*"))
-    if not runs:
+    arms = [(arm, sorted(results_root.glob(f"runs/{arm}_*_seed*"))) for arm in DPO_ARMS]
+    arms = [(arm, runs) for arm, runs in arms if runs]
+    if not arms:
         print("no DPO runs found, skipping dpo_logps figure")
         return
-    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    fig, axes = plt.subplots(1, len(arms), figsize=(6.5 * len(arms), 4.5), sharey=True, squeeze=False)
+    for ax, (arm, runs) in zip(axes[0], arms):
+        _dpo_logps_panel(ax, arm, runs)
+    fig.tight_layout()
+    if not any(ax.get_lines() for ax in axes[0]):
+        print("no logps/chosen in any DPO run's trainer_state.json; dpo_logps figure is empty")
+    fig.savefig(out_dir / "dpo_logps.png")
+    print(f"wrote {out_dir}/dpo_logps.png")
+
+
+def _dpo_logps_panel(ax, arm: str, runs: list[Path]) -> None:
     for i, run in enumerate(runs):
         # numeric step order: as strings, checkpoint-800 sorts after checkpoint-1000
         states = [c / "trainer_state.json" for c in list_checkpoints(run) if (c / "trainer_state.json").exists()]
@@ -52,13 +68,9 @@ def dpo_logp_trajectories(results_root: Path, out_dir: Path) -> None:
                     textcoords="offset points", xytext=(5, 0), fontsize=8, color=INK)
     ax.set_xlabel("training step")
     ax.set_ylabel("mean log-prob of completion")
-    ax.set_title("DPO: chosen (solid) and rejected (dashed) log-probs both drift down", fontsize=11)
+    ax.set_title(f"{METHOD_LABELS.get(arm, arm)}: chosen (solid) and rejected (dashed) log-probs", fontsize=11)
     if ax.get_lines():
         ax.legend(fontsize=8, ncol=2)
-    else:
-        print("no logps/chosen in any DPO run's trainer_state.json; dpo_logps figure is empty")
-    fig.savefig(out_dir / "dpo_logps.png")
-    print(f"wrote {out_dir}/dpo_logps.png")
 
 
 def kl_diagnostics(results_root: Path, out_dir: Path) -> None:
@@ -72,10 +84,9 @@ def kl_diagnostics(results_root: Path, out_dir: Path) -> None:
     for ax, (col, ylabel, title) in zip(axes, panels):
         for arm, arm_df in df.groupby("arm"):
             color = METHOD_COLORS.get(arm, INK)
-            marker = "*" if arm == "sft-base" else "o"
-            ax.scatter(arm_df["kl_k3"], arm_df[col], color=color, marker=marker,
+            ax.scatter(arm_df[KL_COL], arm_df[col], color=color, marker=marker_for(arm),
                        s=90 if arm == "sft-base" else 30, label=arm, alpha=0.85)
-        ax.set_xlabel("KL(policy ‖ π_SFT) [nats/seq]")
+        kl_axis(ax)
         ax.set_ylabel(ylabel)
         ax.set_title(title, fontsize=11)
     axes[0].legend(fontsize=8)

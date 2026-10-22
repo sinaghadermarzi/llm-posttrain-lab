@@ -1,5 +1,7 @@
 # Hyperparameter grids for the math track (scripts/math/*.sh).
 dpo:
   train.beta: [0.01, 0.05, 0.1, 0.3]
+dpo_nll:                 # same grid as dpo: the NLL term is the only difference
+  train.beta: [0.01, 0.05, 0.1, 0.3]
 grpo:
   train.beta: [0.0, 0.01, 0.04, 0.1]  # 0.0 = unconstrained RLVR, expect degenerate KL

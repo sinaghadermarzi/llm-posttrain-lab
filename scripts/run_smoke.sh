@@ -70,8 +70,9 @@ python -m posttrain_lab.utils.chat "$(python -m posttrain_lab.config --results-r
 echo "=== smoke math 2/6: self-generated preference pairs"
 python -m posttrain_lab.gen_pairs configs/math/m2_gen_pairs.yaml
 
-echo "=== smoke math 3/6: DPO arm on self-gen pairs (one beta)"
+echo "=== smoke math 3/6: DPO and DPO+NLL arms on self-gen pairs (one beta each)"
 python -m posttrain_lab.train.dpo configs/math/m3_arm_dpo.yaml train.beta=0.1
+python -m posttrain_lab.train.dpo configs/math/m3_arm_dpo_nll.yaml train.beta=0.1
 
 echo "=== smoke math 4/6: GRPO arm with verifier reward (one beta)"
 python -m posttrain_lab.train.grpo configs/math/m3_arm_grpo.yaml train.beta=0.04

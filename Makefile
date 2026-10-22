@@ -1,6 +1,6 @@
 .PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke \
 	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
-	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-grpo math-eval math-plots math-all
+	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-dpo-nll math-arm-grpo math-eval math-plots math-all
 
 # node readiness: GPUs, NCCL, libs, HF assets, MLflow (see notebooks/onboarding.ipynb)
 preflight:
@@ -97,6 +97,9 @@ math-arm-sft:
 
 math-arm-dpo:
 	bash scripts/math/m3b_arm_dpo.sh
+
+math-arm-dpo-nll:
+	bash scripts/math/m3c_arm_dpo_nll.sh
 
 math-arm-grpo:
 	bash scripts/math/m3d_arm_grpo.sh
