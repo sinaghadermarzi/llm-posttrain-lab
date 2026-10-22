@@ -24,6 +24,7 @@ from omegaconf import DictConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from posttrain_lab.utils.chat import end_of_turn_token
+from posttrain_lab.utils.gpu import free_gpu_memory
 
 
 def response_logprobs(model, input_ids, attention_mask, response_mask):
@@ -96,6 +97,8 @@ def compute_kl(cfg: DictConfig, policy_path: str, samples: list[dict]) -> dict:
         lengths.extend(mask.sum(dim=1).tolist())
         entropies.extend(((-lp_pi * mask).sum(dim=1) / n_tokens).tolist())
 
+    del policy, reference
+    free_gpu_memory()  # else PyTorch keeps it cached and the next checkpoint's vLLM engine can't start
     n = max(len(seq_k3), 1)
     return {
         "kl_k3": sum(seq_k3) / n,
