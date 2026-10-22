@@ -144,3 +144,37 @@ def test_nll_arm_never_relies_on_color_alone(monkeypatch) -> None:
 
     assert METHOD_COLORS["dpo-nll"] == "#e87ba4"
     assert METHOD_LINESTYLES["dpo-nll"] != "-" and METHOD_MARKERS["dpo-nll"] not in ("o", "*")
+
+
+def test_diagnostics_runs_on_math(tmp_path: Path, monkeypatch) -> None:
+    """The math pipeline now calls diagnostics.py: one dpo_logps panel per DPO
+    arm, and diagnostics.png without the helpful-only reward-gap panel."""
+    import json
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    monkeypatch.syspath_prepend(str(ROOT / "analysis"))
+    import diagnostics
+
+    _frontier(tmp_path)
+    df = pd.read_csv(tmp_path / "frontier.csv")
+    df["mean_response_tokens"], df["mean_token_nll"] = 130.0, 0.4   # math has these, not rm_gap_z
+    df.to_csv(tmp_path / "frontier.csv", index=False)
+    for arm in ("dpo", "dpo-nll"):
+        d = tmp_path / "runs" / f"{arm}_beta0.1_seed17" / "checkpoint-10"
+        d.mkdir(parents=True)
+        (d / "trainer_state.json").write_text(json.dumps(
+            {"log_history": [{"step": 10, "logps/chosen": -60.0, "logps/rejected": -80.0}]}))
+
+    figs = []
+    monkeypatch.setattr(plt.Figure, "savefig", lambda self, path, **kw: figs.append((Path(path).name, self)))
+    monkeypatch.setattr(sys, "argv", ["diagnostics.py", str(tmp_path)])
+    diagnostics.main()
+    saved = dict(figs)
+    assert set(saved) == {"dpo_logps.png", "diagnostics.png"}
+    titles = [ax.get_title() for ax in saved["dpo_logps.png"].axes]
+    assert len(titles) == 2 and titles[1].startswith("DPO + NLL")
+    assert [ax.get_title() for ax in saved["diagnostics.png"].axes] == ["Length vs KL", "Entropy vs KL"]

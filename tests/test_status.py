@@ -94,7 +94,9 @@ def test_launcher_plans_follow_the_scripts() -> None:
     assert [ovs for _, _, ovs in helpful["steps"]] == [[], [], [], ["train.beta=0.1"], ["train.kl_coef=0.05"],
                                                         ["train.beta=0.04"]]
     assert status.launcher_plan("math", False)["analysis"] == [
-        "aggregate.py", "frontier_math.py", "diversity_plot.py", "retention_plot.py", "pref_logps_plot.py"]
+        "aggregate.py", "frontier_math.py", "diversity_plot.py", "retention_plot.py", "pref_logps_plot.py",
+        "diagnostics.py"]
+    assert set(status.launcher_plan("math", True)["analysis"]) == set(status.launcher_plan("math", False)["analysis"])
     assert "diagnostics.py" in status.launcher_plan("helpful", False)["analysis"]
     assert set(status.launcher_plan("helpful", True)["analysis"]) == set(status.launcher_plan("helpful", False)["analysis"])
 
@@ -342,7 +344,7 @@ def _touch(path: Path, mtime: float, text: str = "x") -> None:
 MATH_ROW = {"kl_k3": 0.1, "pass1": 0.3, "ppl_wikitext": 9.0, "harness": {}, "distinct_2": 0.5, "self_bleu": 0.2,
             "logp_chosen": -50.0}
 MATH_OUTPUTS = ["figures/frontier_math.png", "figures/frontier_math.pdf", "figures/diversity.png",
-                "figures/retention.png", "figures/pref_logps.png"]
+                "figures/retention.png", "figures/pref_logps.png", "figures/dpo_logps.png", "figures/diagnostics.png"]
 
 
 def test_finished_smoke_run_reads_done(repo, tmp_path: Path) -> None:

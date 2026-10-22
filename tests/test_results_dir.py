@@ -60,11 +60,12 @@ def test_make_plots_follow_results_dir(repo, tmp_path: Path) -> None:
     repo.write_env(f'RESULTS_DIR="{big}"\n')
     commands = [shlex.split(line) for line in repo.run("make", "-n", "plots", "math-plots").stdout.splitlines()]
     plots = [argv for argv in commands if argv[:1] == ["python"] and argv[1].startswith("analysis/")]
-    assert len(plots) == 11
+    assert len(plots) == 12
     for argv in plots:
         assert len(argv) == 3, argv
         assert argv[2] in (f"{big}/helpful", f"{big}/math"), argv
     assert ["python", "analysis/frontier_math.py", f"{big}/math"] in plots
+    assert ["python", "analysis/diagnostics.py", f"{big}/math"] in plots  # DPO vs DPO+NLL log-probs
 
 
 def test_preflight_system_reports_results_dir(repo, tmp_path: Path) -> None:

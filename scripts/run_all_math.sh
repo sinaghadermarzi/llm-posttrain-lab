@@ -35,5 +35,6 @@ python analysis/frontier_math.py "$ROOT"
 python analysis/diversity_plot.py "$ROOT"
 python analysis/retention_plot.py "$ROOT"
 python analysis/pref_logps_plot.py "$ROOT"
+python analysis/diagnostics.py "$ROOT"     # dpo_logps.png: DPO vs DPO+NLL log-probs in training
 
 echo "MATH TRACK DONE — see $ROOT/figures/"

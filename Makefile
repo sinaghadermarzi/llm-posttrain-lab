@@ -113,6 +113,7 @@ math-plots:
 	python analysis/diversity_plot.py "$(MATH_RESULTS)"
 	python analysis/retention_plot.py "$(MATH_RESULTS)"
 	python analysis/pref_logps_plot.py "$(MATH_RESULTS)"
+	python analysis/diagnostics.py "$(MATH_RESULTS)"
 
 math-all:
 	bash scripts/run_all_math.sh
