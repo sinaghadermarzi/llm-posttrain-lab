@@ -27,6 +27,12 @@ def run_hyperparam(run_dir: str | Path) -> str | None:
     return middle[0] if middle else None
 
 
+def run_seed(run_dir: str | Path) -> int | None:
+    """The training seed in a run dir name (..._seed18 -> 18)."""
+    m = re.search(r"_seed(\d+)$", Path(run_dir).name)
+    return int(m[1]) if m else None
+
+
 def list_checkpoints(run_dir: str | Path) -> list[Path]:
     """checkpoint-* dirs sorted by step; falls back to the run dir itself if the
     final model was saved flat (trainer.save_model at the end)."""
@@ -40,12 +46,16 @@ def list_checkpoints(run_dir: str | Path) -> list[Path]:
     return ckpts
 
 
-def discover_all_checkpoints(runs_root: str | Path) -> list[Path]:
+def discover_all_checkpoints(runs_root: str | Path, seeds=None) -> list[Path]:
     """All evaluable checkpoints under results/runs/, excluding the RM (it is
-    not a policy) but including sft-base (the KL=0 baseline point)."""
+    not a policy) but including sft-base (the KL=0 baseline point). seeds:
+    only runs of these training seeds (None: every seed)."""
     out: list[Path] = []
+    wanted = None if seeds is None else {int(s) for s in seeds}
     for run_dir in sorted(Path(runs_root).glob("*_seed*")):
         if run_dir.name.startswith("rm_"):
+            continue
+        if wanted is not None and run_seed(run_dir) not in wanted:
             continue
         out.extend(list_checkpoints(run_dir))
     return out

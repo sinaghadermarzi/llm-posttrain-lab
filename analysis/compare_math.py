@@ -7,17 +7,29 @@ too. This prints each checkpoint's pass@1 ± SE (over prompts) and, for every
 checkpoint after the first, its paired difference to the first with a 95% CI.
 
 Usage:
-    python analysis/compare_math.py [results_root] RUN@STEP RUN@STEP [...]
+    python analysis/compare_math.py [results_root] [--seed N | --pool] RUN@STEP RUN@STEP [...]
     python analysis/compare_math.py dpo_beta0.3@116 grpo_beta0.01@374 grpo_beta0.0@374
+    python analysis/compare_math.py --pool dpo_beta0.3@ckpt10 grpo_beta0.01@last
 
 RUN is a run dir name, or a unique prefix of one (dpo_beta0.3 -> dpo_beta0.3_seed17);
-STEP is a checkpoint step or 'last'. Picking each run's best checkpoint on
-these same prompts flatters it: compare checkpoints chosen some other way
-(matched KL, a fixed step) where you can.
+STEP is a checkpoint step, 'last', or ckptK (the run's K-th checkpoint).
+Picking each run's best checkpoint on these same prompts flatters it: compare
+checkpoints chosen some other way (matched KL, a fixed step) where you can.
+
+Several training seeds: a prefix that matches more than one seed's run needs
+  --seed N   compare seed N's runs (the same as RUN_seedN), or
+  --pool     compare every seed that has all the checkpoints: the paired
+             difference per seed, then their mean with a 95% CI from the
+             spread ACROSS seeds (t with n_seeds - 1 df). That CI is the one
+             that covers training randomness; the per-seed and prompt-pooled
+             CIs only cover eval sampling for these particular trained models.
+             The DPO arms' step counts differ between seeds (each trains on
+             its own seed's pairs): name their checkpoints by ckptK or last.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import re
@@ -27,26 +39,79 @@ from pathlib import Path
 
 from paths import default_root
 
+# two-sided 95% t quantiles by degrees of freedom (no scipy needed)
+T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228,
+       15: 2.131, 20: 2.086, 30: 2.042}
 
-def resolve(eval_root: Path, spec: str) -> Path:
-    if "@" not in spec:
-        sys.exit(f"{spec!r}: expected RUN@STEP (e.g. grpo_beta0.01@374 or dpo_beta0.3@last)")
-    run, step = spec.rsplit("@", 1)
+
+def t95(df: int) -> float:
+    if df in T95:
+        return T95[df]
+    smaller = [k for k in T95 if k < df]
+    return T95[max(smaller)] if df <= 30 else 1.96
+
+
+def run_seed(name: str) -> int | None:
+    m = re.search(r"_seed(\d+)$", name)
+    return int(m[1]) if m else None
+
+
+def matching_runs(eval_root: Path, run: str) -> list[Path]:
     runs = [d for d in eval_root.iterdir() if d.is_dir() and (d.name == run or d.name.startswith(run + "_"))]
     exact = [d for d in runs if d.name == run]
-    if len(exact) == 1:
-        runs = exact
-    if len(runs) != 1:
-        found = ", ".join(sorted(d.name for d in runs)) or "none"
-        sys.exit(f"{spec!r}: run {run!r} matches {found} under {eval_root}")
-    files = {int(m[1]): p for p in runs[0].glob("checkpoint-*.samples.jsonl")
+    return exact if len(exact) == 1 else runs
+
+
+def checkpoint_file(run_dir: Path, spec: str, step: str) -> Path:
+    files = {int(m[1]): p for p in run_dir.glob("checkpoint-*.samples.jsonl")
              if (m := re.fullmatch(r"checkpoint-(\d+)\.samples\.jsonl", p.name))}
     if not files:
-        sys.exit(f"{spec!r}: no samples files in {runs[0]}")
-    key = max(files) if step == "last" else int(step)
-    if key not in files:
-        sys.exit(f"{spec!r}: no checkpoint-{key} samples (have {sorted(files)})")
-    return files[key]
+        sys.exit(f"{spec!r}: no samples files in {run_dir}")
+    if step == "last":
+        return files[max(files)]
+    if m := re.fullmatch(r"ckpt(\d+)", step):
+        k, steps = int(m[1]), sorted(files)
+        if not 1 <= k <= len(steps):
+            sys.exit(f"{spec!r}: {run_dir.name} has {len(steps)} evaluated checkpoints, no ckpt{k}")
+        return files[steps[k - 1]]
+    if int(step) not in files:
+        sys.exit(f"{spec!r}: no checkpoint-{step} samples in {run_dir.name} (have {sorted(files)})")
+    return files[int(step)]
+
+
+def split_spec(spec: str) -> tuple[str, str]:
+    if "@" not in spec:
+        sys.exit(f"{spec!r}: expected RUN@STEP (e.g. grpo_beta0.01@374, dpo_beta0.3@last or dpo_beta0.3@ckpt10)")
+    return spec.rsplit("@", 1)
+
+
+def resolve(eval_root: Path, spec: str, seed: int | None = None) -> Path:
+    """The samples file a RUN@STEP spec names (seed: that seed's run)."""
+    run, step = split_spec(spec)
+    if seed is not None and run_seed(run) is None:
+        run = f"{run}_seed{seed}"
+    runs = matching_runs(eval_root, run)
+    if len(runs) != 1:
+        found = ", ".join(sorted(d.name for d in runs)) or "none"
+        seeds = sorted({s for d in runs if (s := run_seed(d.name)) is not None})
+        hint = f" (seeds {', '.join(map(str, seeds))}: pass --seed N or --pool)" if len(seeds) > 1 else ""
+        sys.exit(f"{spec!r}: run {run!r} matches {found} under {eval_root}{hint}")
+    return checkpoint_file(runs[0], spec, step)
+
+
+def resolve_seeds(eval_root: Path, spec: str) -> dict[int, Path]:
+    """--pool: seed -> samples file for every seed whose run the spec matches."""
+    run, step = split_spec(spec)
+    by_seed: dict[int, list[Path]] = defaultdict(list)
+    for d in matching_runs(eval_root, run):
+        if (s := run_seed(d.name)) is not None:
+            by_seed[s].append(d)
+    for s, dirs in by_seed.items():
+        if len(dirs) > 1:
+            sys.exit(f"{spec!r}: run {run!r} matches {', '.join(sorted(d.name for d in dirs))} for seed {s}")
+    if not by_seed:
+        sys.exit(f"{spec!r}: run {run!r} matches no seeded run under {eval_root}")
+    return {s: checkpoint_file(dirs[0], spec, step) for s, dirs in sorted(by_seed.items())}
 
 
 def per_prompt(path: Path) -> dict[str, float]:
@@ -74,15 +139,19 @@ def kl_of(samples_path: Path) -> float | None:
         return None
 
 
-def main(argv: list[str]) -> None:
-    if argv and Path(argv[0]).is_dir():
-        root, specs = Path(argv[0]), argv[1:]
-    else:
-        root, specs = Path(default_root("math")), argv
-    if len(specs) < 2:
-        sys.exit(__doc__)
-    eval_root = root / "eval"
-    paths = [resolve(eval_root, s) for s in specs]
+def verdict(lo: float, hi: float) -> str:
+    return "better" if lo > 0 else "worse" if hi < 0 else "no clear difference"
+
+
+def paired(base: dict[str, float], sc: dict[str, float]) -> tuple[float, float, int] | None:
+    shared = sorted(set(base) & set(sc))
+    if len(shared) < 2:
+        return None
+    diff, se = mean_se([sc[p] - base[p] for p in shared])
+    return diff, se, len(shared)
+
+
+def compare_one(specs: list[str], paths: list[Path]) -> None:
     scores = [per_prompt(p) for p in paths]
 
     print(f"{'checkpoint':<44} {'prompts':>7} {'pass@1':>7} {'± SE':>6} {'KL k1':>7}")
@@ -94,16 +163,92 @@ def main(argv: list[str]) -> None:
     base_spec, base = specs[0], scores[0]
     print(f"\npaired vs {base_spec} (same prompts; 95% CI = ± 1.96 SE)")
     for spec, sc in zip(specs[1:], scores[1:]):
-        shared = sorted(set(base) & set(sc))
+        shared = set(base) & set(sc)
         if len(shared) < min(len(base), len(sc)):
             print(f"  note: {spec} shares only {len(shared)} prompts with {base_spec} (evaluated on other prompt sets?)")
-        if len(shared) < 2:
+        res = paired(base, sc)
+        if res is None:
             print(f"  {spec}: too few shared prompts")
             continue
-        diff, se = mean_se([sc[p] - base[p] for p in shared])
+        diff, se, n = res
         lo, hi = diff - 1.96 * se, diff + 1.96 * se
-        verdict = "better" if lo > 0 else "worse" if hi < 0 else "no clear difference"
-        print(f"  {spec:<42} {diff:+.3f} ± {se:.3f}  [{lo:+.3f}, {hi:+.3f}]  {verdict}  ({len(shared)} prompts)")
+        print(f"  {spec:<42} {diff:+.3f} ± {se:.3f}  [{lo:+.3f}, {hi:+.3f}]  {verdict(lo, hi)}  ({n} prompts)")
+
+
+def compare_pooled(specs: list[str], files: list[dict[int, Path]]) -> None:
+    seeds = sorted(set.intersection(*(set(f) for f in files)))
+    every = sorted(set.union(*(set(f) for f in files)))
+    if not seeds:
+        sys.exit("--pool: no seed has every checkpoint named (" +
+                 "; ".join(f"{s}: seeds {sorted(f)}" for s, f in zip(specs, files)) + ")")
+    if seeds != every:
+        print(f"note: seeds {sorted(set(every) - set(seeds))} lack some of these checkpoints and are left out")
+    scores = [{s: per_prompt(f[s]) for s in seeds} for f in files]
+    print(f"pooled over seeds {', '.join(map(str, seeds))}\n")
+
+    print(f"{'checkpoint':<36} {'seed':>5} {'prompts':>7} {'pass@1':>7} {'± SE':>6} {'KL k1':>7}")
+    for spec, f, sc in zip(specs, files, scores):
+        means = []
+        for s in seeds:
+            mean, se = mean_se(list(sc[s].values()))
+            means.append(mean)
+            kl = kl_of(f[s])
+            print(f"{spec:<36} {s:>5} {len(sc[s]):>7} {mean:>7.3f} {se:>6.3f} {kl if kl is None else round(kl, 2)!s:>7}")
+        m, se = mean_se(means)
+        print(f"{spec:<36} {'mean':>5} {'':>7} {m:>7.3f} {se:>6.3f}   (± SE across seeds)")
+
+    base_spec, base = specs[0], scores[0]
+    n = len(seeds)
+    print(f"\npaired vs {base_spec}, per seed (same prompts; ± 1.96 SE over prompts) and across seeds "
+          f"(mean of the per-seed differences; ± t{n - 1} SE across seeds)")
+    for spec, sc in zip(specs[1:], scores[1:]):
+        diffs = []
+        for s in seeds:
+            res = paired(base[s], sc[s])
+            if res is None:
+                print(f"  {spec} seed {s}: too few shared prompts")
+                continue
+            diff, se, k = res
+            diffs.append(diff)
+            lo, hi = diff - 1.96 * se, diff + 1.96 * se
+            print(f"  {spec:<34} seed {s:<4} {diff:+.3f} ± {se:.3f}  [{lo:+.3f}, {hi:+.3f}]  {verdict(lo, hi)}  "
+                  f"({k} prompts)")
+        # every seed's per-prompt difference, averaged over seeds: eval noise of the seed-mean only
+        shared = sorted(set.intersection(*(set(base[s]) & set(sc[s]) for s in seeds)))
+        if len(shared) > 1:
+            pooled = [sum(sc[s][p] - base[s][p] for s in seeds) / n for p in shared]
+            diff, se = mean_se(pooled)
+            print(f"  {spec:<34} {'prompts':<9} {diff:+.3f} ± {se:.3f}  [{diff - 1.96 * se:+.3f}, "
+                  f"{diff + 1.96 * se:+.3f}]  (seed-mean per prompt; eval noise only)")
+        if len(diffs) < 2:
+            print(f"  {spec:<34} {'seeds':<9} one seed: no across-seed CI (train another: README 'More seeds')")
+            continue
+        diff, se = mean_se(diffs)
+        t = t95(len(diffs) - 1)
+        lo, hi = diff - t * se, diff + t * se
+        print(f"  {spec:<34} {'seeds':<9} {diff:+.3f} ± {se:.3f}  [{lo:+.3f}, {hi:+.3f}]  {verdict(lo, hi)}  "
+              f"({len(diffs)} seeds, t{len(diffs) - 1} = {t:.2f})")
+
+
+def main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("specs", nargs="*", help="[results_root] RUN@STEP RUN@STEP [...]")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--seed", type=int, help="compare this training seed's runs")
+    group.add_argument("--pool", action="store_true", help="every seed: per-seed and across-seed differences")
+    args = parser.parse_intermixed_args(argv)  # [results_root] --pool RUN@STEP ...
+    specs = args.specs
+    if specs and Path(specs[0]).is_dir():
+        root, specs = Path(specs[0]), specs[1:]
+    else:
+        root = Path(default_root("math"))
+    if len(specs) < 2:
+        sys.exit(__doc__)
+    eval_root = root / "eval"
+    if args.pool:
+        compare_pooled(specs, [resolve_seeds(eval_root, s) for s in specs])
+    else:
+        compare_one(specs, [resolve(eval_root, s, args.seed) for s in specs])
 
 
 if __name__ == "__main__":
