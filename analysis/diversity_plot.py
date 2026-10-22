@@ -5,6 +5,11 @@ samples per prompt converging on one mode), token NLL (falling = sharpening),
 and — when present (math track) — the pass@k−pass@1 gap (shrinking gap while
 pass@1 holds = the model trading solution diversity for single-shot accuracy).
 
+With one training seed every checkpoint is one point. With several, each point
+is the seed mean of an (arm, hyperparam) at one checkpoint index
+(aggregate.py:seed_view), with error bars = SE of the mean across seeds on
+both axes.
+
 Usage: python analysis/diversity_plot.py [results_root]
 """
 
@@ -16,14 +21,15 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from aggregate import seed_view, seeds_caption
 from paths import default_root
-from style import INK, KL_COL, METHOD_COLORS, apply_style, kl_axis, marker_for
+from style import INK, KL_COL, METHOD_COLORS, apply_style, errorbars, kl_axis, marker_for
 
 
 def main() -> None:
     apply_style()
     results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root())
-    df = pd.read_csv(results_root / "frontier.csv")
+    df, seeds = seed_view(pd.read_csv(results_root / "frontier.csv"))
 
     panels = [
         ("distinct_2", "distinct-2 (unique bigram ratio)", "Repetition"),
@@ -41,10 +47,14 @@ def main() -> None:
             color = METHOD_COLORS.get(arm, INK)
             ax.scatter(arm_df[KL_COL], arm_df[col], color=color, marker=marker_for(arm),
                        s=90 if arm == "sft-base" else 30, label=arm, alpha=0.85)
+            if len(seeds) > 1:
+                errorbars(ax, arm_df, col, color)
         kl_axis(ax)
         ax.set_ylabel(ylabel)
         ax.set_title(title, fontsize=11)
     axes[0].legend(fontsize=8)
+    if len(seeds) > 1:
+        fig.suptitle(seeds_caption(seeds), fontsize=11)
     fig.tight_layout()
 
     out_dir = results_root / "figures"

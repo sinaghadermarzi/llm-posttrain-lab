@@ -47,6 +47,18 @@ def kl_axis(ax) -> None:
     ax.set_xlabel(KL_LABEL)
 
 
+
+def errorbars(ax, df, ycol: str, color: str, xcol: str = KL_COL) -> None:
+    """Thin bars behind a curve or scatter: <ycol>_se (math pass@k: SE over
+    prompts, eval/passk.py; or across seeds, aggregate.py:seed_view) and,
+    where present, <xcol>_se on x (across seeds)."""
+    yerr = df[f"{ycol}_se"] if f"{ycol}_se" in df.columns else None
+    xerr = df[f"{xcol}_se"] if f"{xcol}_se" in df.columns else None
+    if not any(e is not None and e.notna().any() for e in (yerr, xerr)):
+        return
+    ax.errorbar(df[xcol], df[ycol], yerr=yerr, xerr=xerr, fmt="none", ecolor=color,
+                elinewidth=0.8, alpha=0.45, capsize=0, zorder=1)
+
 # ordinal blue ramp for within-method hyperparameter series (e.g. DPO betas)
 BLUE_RAMP = ["#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
 

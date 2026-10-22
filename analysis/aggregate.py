@@ -101,6 +101,40 @@ def seed_means(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def seed_curves(df: pd.DataFrame, n_seeds: int) -> pd.DataFrame:
+    """frontier.csv rows -> one pseudo-run per (arm, hyperparam): the seed
+    means at each checkpoint index, <metric>_se = the across-seed SE (which
+    already contains each seed's eval noise), in the shape the figures draw.
+    step = ckpt_index (the order along the curve); step_mean = the mean of
+    the seeds' steps there."""
+    means = seed_means(add_seed_columns(df))
+    short = means[means["n_seeds"] < n_seeds]
+    if len(short):
+        print(f"note: {len(short)} of {len(means)} points have fewer than {n_seeds} seeds (not trained / "
+              "evaluated for every seed yet): their mean is over the seeds that have them")
+    out = means[["arm", "hyperparam", "ckpt_index", "n_seeds"]].copy()
+    out["run"] = means["arm"] + "_" + means["hyperparam"].fillna("").astype(str)
+    out["step"] = means["ckpt_index"]
+    out["step_mean"] = means["step"]
+    for col in [c for c in means.columns if c.endswith("_seed_se")]:
+        metric = col[: -len("_seed_se")]
+        out[metric] = means[metric]
+        out[f"{metric}_se"] = means[col]
+    return out
+
+
+def seed_view(df: pd.DataFrame) -> tuple[pd.DataFrame, list[int]]:
+    """frontier.csv rows as the figures draw them, and the training seeds in
+    them: with more than one seed, seed_curves; with one (or none), the rows
+    unchanged."""
+    seeds = [int(s) for s in sorted(add_seed_columns(df)["seed"].dropna().unique())]
+    return (seed_curves(df, len(seeds)) if len(seeds) > 1 else df), seeds
+
+
+def seeds_caption(seeds: list[int]) -> str:
+    return f"mean ± SE over seeds {', '.join(str(s) for s in seeds)}"
+
+
 def main() -> None:
     results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root())
     df = load_rows(results_root / "eval")
