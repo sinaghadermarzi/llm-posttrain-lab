@@ -44,7 +44,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 from posttrain_lab.config import CONFIG_DIR, load_config
-from posttrain_lab.eval.groups import SENTINELS
+from posttrain_lab.eval.groups import SENTINELS, missing_groups
 from posttrain_lab.utils.chat import PROBE_FILE, PROBE_MIN_P
 from posttrain_lab.utils.checkpoints import DONE_MARKER, discover_all_checkpoints
 from posttrain_lab.utils.dotenv import REPO_ROOT, results_dir, results_dir_source
@@ -929,6 +929,9 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
     root = Path(str(eval_cfg.results_root))
     out_dir = Path(str(eval_cfg.eval.out_dir))
     groups = [g for g in eval_cfg.eval.metric_groups if g in SENTINELS]
+    num_prompts = eval_cfg.eval.get("num_prompts")
+    num_prompts = int(num_prompts) if num_prompts is not None else None
+    spp = eval_cfg.eval.get("samples_per_prompt")
     ckpts = discover_all_checkpoints(root / "runs") if (root / "runs").exists() else []
     per_group = {g: 0 for g in groups}
     per_run: dict[str, list[int]] = {}
@@ -937,7 +940,8 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
     for ck in ckpts:
         run_dir = ck.parent if ck.name.startswith("checkpoint-") else ck
         row = last_jsonl(out_dir / run_dir.name / f"{ck.name}.jsonl") or {}
-        done_groups = [g for g in groups if all(k in row for k in SENTINELS[g])]
+        todo = missing_groups(row, groups, num_prompts, int(spp) if spp else None)  # incl. other prompt counts
+        done_groups = [g for g in groups if g not in todo]
         for g in done_groups:
             per_group[g] += 1
         ok = len(done_groups) == len(groups)
