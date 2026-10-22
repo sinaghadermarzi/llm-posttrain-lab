@@ -352,6 +352,24 @@ cached / downloadable / missing per asset), and `python -m posttrain_lab.preflig
 hf_load` to actually load each one (tokenizer + config per model, every dataset
 split, lm-eval's task build) with the current env.
 
+## Evidence and findings (`evidence/`)
+
+What the runs found lives in git under [`evidence/`](evidence/README.md). It has three parts:
+- [`FINDINGS.md`](evidence/FINDINGS.md): the claims, each with an ID, a status and its evidence;
+- [`LOG.md`](evidence/LOG.md): a dated lab log of runs, incidents and decisions;
+- frozen **snapshots** of a results tree: figures, tables, configs, the pre-registered comparisons in
+  `evidence/<task>/snapshot.yaml`, example responses and a manifest.
+
+On the pod, once a run's figures are rebuilt:
+
+```bash
+make evidence TASK=math NAME=seeds17-19_full-test EVIDENCE_ARGS="--note '3 seeds, 1319 prompts'"
+```
+
+Snapshots are never edited: a newer one supersedes an older one. The rules are in `evidence/README.md` and
+[`AGENTS.md`](AGENTS.md). The `evidence-snapshot` and `update-findings` skills (`.claude/skills/`) walk an agent
+through both steps.
+
 ## Reading the figures (`results/<task>/figures/`)
 
 - **`frontier.png`** (helpful): judge reward (left) vs training-RM reward
@@ -384,10 +402,12 @@ src/posttrain_lab/
   reset.py                make reset: stop a track's jobs, clear its results/logs, relaunch
   train/                  thin TRL wrappers (the swappable layer for future verl/OpenRLHF)
   eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
-analysis/                 aggregate → frontier.csv + frontier_seeds.csv (seed means); frontier, frontier_math, retention, diversity, pref_logps, diagnostics
+analysis/                 aggregate → frontier.csv + frontier_seeds.csv (seed means); export_evidence (make evidence); frontier, frontier_math, retention, diversity, pref_logps, diagnostics
 scripts/{helpful,math}/   per-stage launchers; run_all_{helpful,math}.sh; run_smoke.sh
 scripts/prefetch_assets.py  fill an HF_HOME for the offline cluster
 tests/                    python -m pytest tests/ (CPU; the download test skips without internet)
+evidence/                 git-tracked findings: FINDINGS.md, LOG.md, snapshots (make evidence)
+AGENTS.md                 conventions for agents and contributors (CLAUDE.md imports it)
 ```
 
 ## Known risks / gotchas
