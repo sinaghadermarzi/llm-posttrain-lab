@@ -43,6 +43,7 @@ from posttrain_lab.eval.reward_score import score_samples
 from posttrain_lab.tasks.gsm8k import is_correct
 from posttrain_lab.utils.checkpoints import (discover_all_checkpoints, list_checkpoints, run_arm, run_hyperparam,
                                             run_seed)
+from posttrain_lab.utils.gpu import free_gpu_memory
 from posttrain_lab.utils.logging import log_eval_metrics, tracking_enabled
 
 
@@ -231,6 +232,7 @@ def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
         row.update(metrics)
         _atomic_write_row(summary_path, row)  # progress survives a crash mid-checkpoint
         _sync_tracking(cfg, run_dir, summary_path, row)
+        free_gpu_memory()  # each group loads its own models; the next one (or checkpoint) needs the GPU back
 
 
 def main() -> None:

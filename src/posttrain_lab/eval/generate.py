@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from omegaconf import DictConfig
 
+from posttrain_lab.utils.gpu import free_gpu_memory, shutdown_vllm
+
 
 def sample_responses(cfg: DictConfig, checkpoint: str, prompts: list[dict]) -> list[dict]:
     """Returns rows: {prompt_id, prompt, sample_idx, response, finished, stop_token_id}."""
@@ -64,7 +66,17 @@ def _report(rows: list[dict], cfg) -> None:
 def _vllm_generate(cfg, checkpoint, prompts, n, stops):
     from vllm import LLM, SamplingParams
 
+    free_gpu_memory()  # the engine runs in its own process: it can't use what this one holds cached
     llm = LLM(model=checkpoint, dtype=str(cfg.model.dtype), gpu_memory_utilization=0.85)
+    try:
+        return _vllm_rows(llm, SamplingParams, cfg, prompts, n, stops)
+    finally:
+        shutdown_vllm(llm)  # free its share now, before the next checkpoint's engine starts
+        del llm
+        free_gpu_memory()
+
+
+def _vllm_rows(llm, SamplingParams, cfg, prompts, n, stops):
     params = SamplingParams(
         n=n,
         temperature=float(cfg.eval.temperature),
