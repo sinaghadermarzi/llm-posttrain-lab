@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Math m4: evaluate every math checkpoint (generate -> KL -> verify -> metric
 # groups), sharded across GPUs. Incremental: re-run any time; only missing
-# metric groups are computed.
+# metric groups are computed. Only seed $SEED's runs (scripts/math/seed.sh): each
+# is scored against its own seed's pi_SFT (KL) and held-out pairs (pref_logps).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source scripts/math/seed.sh
 NGPU="${NGPU:-4}"
 
 pids=(); failed=()
 for i in $(seq 0 $((NGPU - 1))); do
-  CUDA_VISIBLE_DEVICES=$i python -m posttrain_lab.eval.run_eval task=math --shard "$i/$NGPU" "$@" \
-    > "logs_math_eval_shard$i.log" 2>&1 &
+  CUDA_VISIBLE_DEVICES=$i python -m posttrain_lab.eval.run_eval task=math "seed=$SEED" --shard "$i/$NGPU" "$@" \
+    > "logs_math_eval_shard$i$SEED_LOG.log" 2>&1 &
   pids+=("$!")
 done
 # wait on each shard individually; a bare `wait` always returns 0
 for i in "${!pids[@]}"; do
-  wait "${pids[$i]}" || failed+=("shard $i (logs_math_eval_shard$i.log)")
+  wait "${pids[$i]}" || failed+=("shard $i (logs_math_eval_shard$i$SEED_LOG.log)")
 done
 
 if (( ${#failed[@]} )); then

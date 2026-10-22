@@ -1,9 +1,10 @@
 """Start a track over: stop its jobs, clear its results and logs, optionally relaunch.
 
     python -m posttrain_lab.reset {math|helpful|all} [--smoke] [--archive]
-                                  [--stage KEY] [--relaunch] [--dry-run] [--yes]
+                                  [--stage KEY [--seed N]] [--relaunch] [--dry-run] [--yes]
     make reset TASK=math [RESET_ARGS="--relaunch"]     make reset-smoke
-    make reset TASK=math RESET_ARGS="--stage m3b --relaunch"   # redo one arm only
+    make reset TASK=math RESET_ARGS="--stage m3b --relaunch"   # redo one arm only, every seed
+    make reset TASK=math RESET_ARGS="--stage m3b --seed 18 --relaunch"   # ... of seed 18 only
 
 In order:
 
@@ -30,6 +31,13 @@ them); step 3 only its per-run logs. The
 relaunched `make <task>-all` skips every stage still DONE, trains the arm,
 evaluates just its checkpoints and rebuilds the figures.
 
+Seeds (math): --stage clears the arm for EVERY seed by default (an arm's
+config changed, so no seed's old runs are comparable any more), and
+--relaunch then retrains it for each removed seed that still has its pi_SFT
+(`make math-seeds SEEDS="17 18"`). --stage KEY --seed N clears and relaunches
+seed N's runs of the arm only (`make math-all SEED=N`); the other seeds'
+runs, eval results and logs stay.
+
 It prints the whole plan first and asks you to type the track name before
 touching anything (--yes skips that, --dry-run only prints the plan). It
 never touches the HF model/dataset cache, .env, the other track's results,
@@ -54,12 +62,13 @@ from omegaconf import OmegaConf
 
 from posttrain_lab import status
 from posttrain_lab.config import CONFIG_DIR, load_config, results_root
+from posttrain_lab.utils.checkpoints import run_seed
 from posttrain_lab.utils.dotenv import REPO_ROOT, results_dir
 
 # make targets (Makefile) that drive each track
 MAKE_TARGETS = {
     "math": {"math-sft-base", "math-pairs", "math-arm-sft", "math-arm-dpo", "math-arm-dpo-nll", "math-arm-grpo",
-             "math-eval", "math-plots", "math-all", "all"},
+             "math-eval", "math-plots", "math-all", "math-seeds", "all"},
     "helpful": {"sft-base", "rm", "arm-sft", "arm-dpo", "arm-ppo", "arm-grpo", "eval", "plots", "helpful-all", "all"},
     "smoke": {"smoke"},
 }
@@ -259,11 +268,12 @@ def run_name_pattern(stage_yaml: str) -> re.Pattern:
     return re.compile("".join(re.escape(x) + ".+" for x in parts[:-1]) + re.escape(parts[-1]))
 
 
-def stage_dirs(task: str, key: str) -> list[Path]:
+def stage_dirs(task: str, key: str, seed: int | None = None) -> list[Path]:
     """An arm's run dirs and their eval result dirs: the configured runs (one
     per sweep value) plus any existing dir of that arm the config no longer
     names (an old grid, another seed), which eval would otherwise still pick
-    up. Refuses anything outside <root>/runs and <root>/eval."""
+    up. seed: only that seed's (configured runs at seed=N, existing dirs
+    ending _seed<N>). Refuses anything outside <root>/runs and <root>/eval."""
     stage = find_stage(task, key)
     root = safe_root(task, False)
     if stage.sweep:
@@ -271,6 +281,8 @@ def stage_dirs(task: str, key: str) -> list[Path]:
         overrides = [[f"{k}={v}"] for k, vs in grid.items() for v in vs]
     else:
         overrides = [[]]
+    if seed is not None:
+        overrides = [ov + [f"seed={seed}"] for ov in overrides]
     with _smoke_env(False):
         eval_dir = _anchored(load_config("eval.yaml", [f"task={task}"]).eval.out_dir)
         runs = [_anchored(load_config(stage.yaml, ov).output_dir) for ov in overrides]
@@ -278,7 +290,8 @@ def stage_dirs(task: str, key: str) -> list[Path]:
     pattern = run_name_pattern(stage.yaml)
     for parent in (root / "runs", eval_dir):
         if parent.is_dir():
-            names |= {d.name for d in parent.iterdir() if d.is_dir() and pattern.fullmatch(d.name)}
+            names |= {d.name for d in parent.iterdir() if d.is_dir() and pattern.fullmatch(d.name)
+                      and (seed is None or run_seed(d) == seed)}
     out = []
     for name in sorted(names):
         for path, parent in ((root / "runs" / name, root / "runs"), (eval_dir / name, root / "eval")):
@@ -311,11 +324,40 @@ def stage_processes(task: str, dirs: list[Path], procs: list[dict] | None = None
     return arm, {pid: why for pid, why in everything.items() if pid not in arm}
 
 
-def stage_logs(task: str, key: str) -> list[Path]:
+def stage_logs(task: str, key: str, seed: int | None = None) -> list[Path]:
+    """An arm's per-run logs: every seed's, or seed's only (the default seed's
+    logs have no _seed<N> suffix: status.log_name)."""
     stage = find_stage(task, key)
     if not stage.log:
         return []
-    return sorted(p for p in REPO_ROOT.glob(stage.log.replace("{ov}", "*")) if p.is_file())
+    found = sorted(p for p in REPO_ROOT.glob(stage.log.replace("{ov}", "*")) if p.is_file())
+    if seed is None:
+        return found
+    tagged = re.compile(r".*_seed(\d+)\.log")
+    return [p for p in found if (m := tagged.fullmatch(p.name)) and int(m[1]) == seed
+            or not m and seed == status.base_seed()]
+
+
+def relaunch_seeds(task: str, dirs: list[Path], seed: int | None) -> list[int]:
+    """The math seeds a --stage --relaunch retrains: --seed, else every seed
+    whose runs it removes and whose pi_SFT is still there (a stray old seed
+    without one is only cleared), else the default seed."""
+    if seed is not None:
+        return [seed]
+    if task != "math":
+        return [status.base_seed()]
+    found = {run_seed(d) for d in dirs if d.parent.name == "runs" and d.exists()} - {None}
+    seeds = sorted(s for s in found if (safe_root(task, False) / "runs" / f"sft-base_seed{s}").is_dir())
+    return seeds or [status.base_seed()]
+
+
+def make_command(task: str, seeds: list[int] | None) -> tuple[list[str], str]:
+    """(make argv, log name) that runs the track again for these math seeds."""
+    if task != "math" or not seeds or seeds == [status.base_seed()]:
+        return ["make", f"{task}-all"], f"{task}-all.log"
+    if len(seeds) == 1:
+        return ["make", "math-all", f"SEED={seeds[0]}"], f"math-all-seed{seeds[0]}.log"
+    return ["make", "math-seeds", f"SEEDS={' '.join(map(str, seeds))}"], "math-all.log"
 
 
 def track_logs(tasks: list[str], smoke: bool) -> list[Path]:
@@ -353,7 +395,7 @@ def hf_tmp_files(min_age_s: float = STALE_TMP_S) -> list[Path]:
 # 4. relaunch
 
 
-def relaunch(task: str, smoke: bool) -> list[str]:
+def relaunch(task: str, smoke: bool, seeds: list[int] | None = None) -> list[str]:
     for pid in gpu_logger_pids():
         try:
             os.kill(pid, signal.SIGTERM)
@@ -366,24 +408,24 @@ def relaunch(task: str, smoke: bool) -> list[str]:
                                   "--format=csv", "-l", "30"], cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT,
                                  stdin=subprocess.DEVNULL, start_new_session=True)
         started.append(f"GPU logger pid {p.pid} -> gpu_util.csv")
-    target, log = ("smoke", "smoke.log") if smoke else (f"{task}-all", f"{task}-all.log")
+    argv, log = (["make", "smoke"], "smoke.log") if smoke else make_command(task, seeds)
     if task == "all" and not smoke:
-        target, log = "all", "all.log"
-    env = {k: v for k, v in os.environ.items() if k != "SMOKE"}
+        argv, log = ["make", "all"], "all.log"
+    env = {k: v for k, v in os.environ.items() if k not in ("SMOKE", "SEED", "SEEDS")}
     with (REPO_ROOT / log).open("w") as out:
-        p = subprocess.Popen(["make", target], cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT,
+        p = subprocess.Popen(argv, cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, start_new_session=True, env=env)
-    started.append(f"make {target} pid {p.pid} -> {log}")
+    started.append(f"{' '.join(argv)} pid {p.pid} -> {log}")
     return started
 
 
 # ---------------------------------------------------------------------------
 
 
-def plan(task: str, smoke: bool, stage: str | None = None) -> dict:
+def plan(task: str, smoke: bool, stage: str | None = None, seed: int | None = None) -> dict:
     tasks = _tasks(task)
     procs = status.list_processes()
-    roots = stage_dirs(task, stage) if stage else [safe_root(t, smoke) for t in tasks]
+    roots = stage_dirs(task, stage, seed) if stage else [safe_root(t, smoke) for t in tasks]
     blocking: dict[int, str] = {}
     if stage:
         pids, blocking = stage_processes(task, roots, procs)
@@ -394,8 +436,9 @@ def plan(task: str, smoke: bool, stage: str | None = None) -> dict:
     return {
         "tasks": tasks, "smoke": smoke, "processes": pids,
         "roots": [(r, status.dir_size(r) if r.exists() else None) for r in roots],
-        "logs": stage_logs(task, stage) if stage else track_logs(tasks, smoke), "hf_tmp": hf_tmp_files(),
-        "other_running": sorted(others), "stage": stage, "blocking": blocking,
+        "logs": stage_logs(task, stage, seed) if stage else track_logs(tasks, smoke), "hf_tmp": hf_tmp_files(),
+        "other_running": sorted(others), "stage": stage, "blocking": blocking, "seed": seed,
+        "relaunch_seeds": relaunch_seeds(task, roots, seed) if stage else None,
     }
 
 
@@ -403,7 +446,8 @@ def show(pl: dict, archive: bool, do_relaunch: bool) -> None:
     label = " + ".join(pl["tasks"]) + (" (smoke)" if pl["smoke"] else "")
     if pl.get("stage"):
         stage = find_stage(pl["tasks"][0], pl["stage"])
-        label += f" {stage.key} ({stage.title} only: its runs and their eval results)"
+        which = f" seed {pl['seed']}" if pl.get("seed") is not None else ""
+        label += f" {stage.key}{which} ({stage.title} only: its runs and their eval results)"
     print(f"reset {label}   code {_commit()}")
     print("\n1. stop jobs")
     if pl["processes"]:
@@ -433,8 +477,9 @@ def show(pl: dict, archive: bool, do_relaunch: bool) -> None:
         print("\n   upstream stages, the other arms and their eval results stay; the figures are rebuilt when the "
               "track runs again")
     if do_relaunch:
-        print("\n4. relaunch: fresh GPU logger + detached make "
-              + ("smoke" if pl["smoke"] else "all" if len(pl["tasks"]) > 1 else f"{pl['tasks'][0]}-all"))
+        target = "make smoke" if pl["smoke"] else "make all" if len(pl["tasks"]) > 1 else \
+            " ".join(make_command(pl["tasks"][0], pl.get("relaunch_seeds"))[0])
+        print(f"\n4. relaunch: fresh GPU logger + detached {target}")
         if pl["other_running"]:
             print(f"   note: {len(pl['other_running'])} process(es) of the other track are still running and will "
                   "share the GPUs")
@@ -535,6 +580,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--archive", action="store_true", help="rename the results dir instead of deleting it")
     parser.add_argument("--stage", metavar="KEY", help="redo one arm only (math m3a-m3d, helpful 3a-3d): "
                         "its runs, their eval results and logs")
+    parser.add_argument("--seed", type=int, metavar="N", help="with --stage (math): only training seed N's runs "
+                        "of the arm (default: every seed's)")
     parser.add_argument("--relaunch", action="store_true", help="start the GPU logger and the track again, detached")
     parser.add_argument("--dry-run", action="store_true", help="print the plan and exit")
     parser.add_argument("--yes", action="store_true", help="do not ask for confirmation")
@@ -546,8 +593,10 @@ def main(argv: list[str] | None = None) -> None:
         if args.stage not in ARM_STAGES[args.task]:
             parser.error(f"--stage {args.stage}: only an arm can be redone alone ({args.task}: "
                          f"{', '.join(ARM_STAGES[args.task])}); later stages train from the others, reset the track")
+    if args.seed is not None and (not args.stage or args.task != "math"):
+        parser.error("--seed needs --stage on the math track (the only track the scripts run per seed)")
 
-    pl = plan(args.task, args.smoke, args.stage)
+    pl = plan(args.task, args.smoke, args.stage, args.seed)
     show(pl, args.archive, args.relaunch)
     if pl["blocking"] and not args.dry_run:
         print("\n" + BLOCKED.format(task=args.task))
@@ -562,13 +611,19 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
     if args.relaunch:
         print("== relaunch")
-        for line in relaunch(args.task, args.smoke):
+        for line in relaunch(args.task, args.smoke, pl.get("relaunch_seeds")):
             print(f"   {line}")
         print("\nwatch it with: make status" + ("" if args.smoke else f" TASK={args.task}" if args.task != "all" else ""))
     else:
+        argv, log = make_command(args.task, pl.get("relaunch_seeds"))
         print("\n[reset] done. Start again with: "
-              + ("make smoke" if args.smoke else f"nohup make {args.task}-all > {args.task}-all.log 2>&1 &"
+              + ("make smoke" if args.smoke else f"nohup {' '.join(argv[:2])} {_quoted(argv[2:])}> {log} 2>&1 &"
                  if args.task != "all" else "nohup make all > all.log 2>&1 &"))
+
+
+def _quoted(args: list[str]) -> str:
+    """make VAR=value args for a shell line ('SEEDS="17 18"'), each followed by a space."""
+    return "".join((f'{a.split("=", 1)[0]}="{a.split("=", 1)[1]}" ' if " " in a else f"{a} ") for a in args)
 
 
 if __name__ == "__main__":

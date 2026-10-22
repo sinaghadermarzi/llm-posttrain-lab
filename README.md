@@ -82,6 +82,10 @@ each run's best on these same prompts flatters it.
 python analysis/compare_math.py "$RESULTS_DIR/math" dpo_beta0.3@116 grpo_beta0.01@374 grpo_beta0.0@374
 ```
 
+These CIs cover eval sampling only, for these particular trained models. How
+much a rerun with another training seed moves the numbers needs more seeds
+(see [More seeds](#more-seeds-math-track)).
+
 ## Quickstart
 
 New node? Walk through [`notebooks/onboarding.ipynb`](notebooks/onboarding.ipynb)
@@ -118,7 +122,7 @@ make smoke        # REQUIRED first: both tracks end-to-end on Qwen2.5-0.5B,
                   # both reward paths, and every metric group.
 
 make helpful-all  # ~2.5-3 days on 4x A100 80GB (+~15-20h for harness-everywhere)
-make math-all     # ~12-15 h on 4x A100 80GB
+make math-all     # ~12-15 h on 4x A100 80GB (one seed; SEED=18 for another: "More seeds")
 ```
 
 Everything is idempotent (DONE markers, incremental eval): re-run any script
@@ -171,7 +175,9 @@ It is read-only and quick (no torch import). `--json` prints the same report
 as JSON, `--smoke` shows the smoke tree against exactly what `run_smoke.sh`
 runs, `--log PATH` points at a launcher log with a different name (each track
 reads only its own `=== ` headers from it). Re-running `make <task>-all` after a stop skips
-finished runs; the report's `resume` line gives the exact command.
+finished runs; the report's `resume` line gives the exact command. With more
+than one training seed, every stage lists one run per sweep value and seed,
+and eval coverage is counted per seed; `--seed N` (repeatable) shows only those seeds.
 
 ### Starting over
 
@@ -205,7 +211,12 @@ make reset TASK=math RESET_ARGS="--stage m3b --archive --relaunch"
 `--stage` takes an arm (math `m3a`–`m3d`, helpful `3a`–`3d`). It removes
 only that arm's run dirs, their eval results and their per-run logs. That
 includes old runs of the arm the config no longer names, such as a previous
-sweep grid or seed. It stops only that arm's own jobs, and refuses while
+sweep grid or seed. **By default it clears the arm for every seed**: once an
+arm's config changes, no seed's old runs are comparable any more. `--relaunch`
+then retrains it for each removed seed that still has its π_SFT, with
+`make math-seeds SEEDS="17 18"`. Add `--seed N` (math only) to clear and
+relaunch just seed N's runs of the arm (`make math-all SEED=N`); the other
+seeds' runs, eval results and logs stay. It stops only that arm's own jobs, and refuses while
 anything else in the track is running (the driver, another arm, eval), so
 nothing else gets cut short.
 `--archive` moves them to `<root>/archive/<timestamp>/`, where eval and the
@@ -213,6 +224,65 @@ figures don't see them, which is handy to compare old and new. The relaunched
 `make <task>-all` skips every stage that is still DONE, trains the arm,
 evaluates just its checkpoints and rebuilds the figures. You type the stage
 key to confirm.
+
+## More seeds (math track)
+
+Seed 17 is one training run per arm and β. The pass@1 SEs cover eval
+sampling, not how much a rerun with another seed would move a curve. The math
+stages take a `SEED` (default 17, from `configs/base.yaml`). It reaches every
+stage as `seed=N`, and every seed-dependent path carries it: π_SFT
+(`runs/sft-base_seedN`), the self-generated pairs (`data/self_pairs_seedN`)
+and every arm's run dir. So a second seed retrains the whole chain from π_SFT
+next to seed 17's runs. It never touches or reuses them, and it is never
+skipped as DONE because of them.
+
+```bash
+nohup make math-all SEED=18 > math-all-seed18.log 2>&1 &     # one more seed
+nohup make math-seeds SEEDS="18 19" > math-all.log 2>&1 &     # or several, one after the other
+make status TASK=math                                         # every seed; STATUS_ARGS="--seed 18" for one
+```
+
+**Cost per extra seed** on 4× A100 80GB: about 12–15 h and about 60 GB of disk.
+- **Training, about 6 h.** π_SFT about 30 min, pairs about 1 h, SFT arm, the
+  DPO and DPO+NLL sweeps (parallel, 1 GPU each), then the 4 GRPO runs one
+  after another at about 1 h each.
+- **Eval, about 6–9 h.** That covers the seed's 112 checkpoints (π_SFT 3,
+  SFT 9, DPO 40, DPO+NLL 40, GRPO 20) on all 1,319 test prompts.
+  `eval.harness.which: final` in `configs/eval.yaml` runs the lm-eval harness
+  on each run's last checkpoint only, which cuts a good part of that.
+
+Eval (`m4`, `make math-eval SEED=N`) scores only seed N's runs. Each is
+measured against its own seed's π_SFT (KL) and held-out pairs (`pref_logps`).
+`run_eval` refuses a checkpoint of another seed, so the reference can't be
+mixed up. Per-run logs of a seed other than 17 end in `_seedN`
+(`logs_math_dpo_train_beta_0_1_seed18.log`). Seed 17's names are unchanged.
+
+**Analysis across seeds.**
+- **`frontier.csv`** keeps one row per checkpoint. Run names include the seed,
+  and each row has `seed` and `ckpt_index` columns (1 = the run's first
+  checkpoint).
+- **`frontier_seeds.csv`** has one row per (arm, hyperparam, `ckpt_index`).
+  Columns: `n_seeds`; each metric's mean over seeds; `<metric>_seed_se`, the SE
+  of that mean across seeds; and for pass@k, `<metric>_prompt_se`, the part of
+  the error eval sampling alone would explain. Seeds are matched by checkpoint
+  index, not step: each seed's DPO arms train on that seed's own pairs, so
+  their step counts differ.
+- **`figures/frontier_math.png`.** With one seed it is unchanged. With more
+  than one, it draws one curve per (arm, β) through the seed means, with
+  across-seed error bars on both pass@k and KL.
+- **The other figures** (diversity, retention, pref_logps, diagnostics) still
+  draw every run, so each seed shows up as its own curve.
+- **`compare_math.py`.** Pick one seed with `--seed 18` (or name the run in
+  full, `dpo_beta0.3_seed18@last`). Or pool them with `--pool`: that prints the
+  paired difference per seed, then their mean with a 95% CI from the spread
+  across seeds (t with n_seeds − 1 df). Only that last CI covers training
+  randomness. With 2 seeds, t₁ = 12.7 makes it very wide; 3 seeds (t₂ = 4.3)
+  is the least that says much. Name DPO checkpoints by position (`@ckpt10`) or
+  `@last`, since their steps differ between seeds.
+
+```bash
+python analysis/compare_math.py "$RESULTS_DIR/math" --pool dpo_beta0.3@ckpt10 grpo_beta0.01@last
+```
 
 ## Offline cluster (Hugging Face assets)
 
@@ -305,7 +375,7 @@ src/posttrain_lab/
   reset.py                make reset: stop a track's jobs, clear its results/logs, relaunch
   train/                  thin TRL wrappers (the swappable layer for future verl/OpenRLHF)
   eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
-analysis/                 aggregate → frontier.csv; frontier, frontier_math, retention, diversity, pref_logps, diagnostics
+analysis/                 aggregate → frontier.csv + frontier_seeds.csv (seed means); frontier, frontier_math, retention, diversity, pref_logps, diagnostics
 scripts/{helpful,math}/   per-stage launchers; run_all_{helpful,math}.sh; run_smoke.sh
 scripts/prefetch_assets.py  fill an HF_HOME for the offline cluster
 tests/                    python -m pytest tests/ (CPU; the download test skips without internet)

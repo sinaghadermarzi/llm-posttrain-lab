@@ -5,9 +5,10 @@
 # arm through this script: CFG / SWEEP / TAG pick its config, grid and log names.
 CFG="${CFG:-configs/math/m3_arm_dpo.yaml}"
 SWEEP="${SWEEP:-dpo}"
-TAG="${TAG:-dpo}"   # logs_math_${TAG}_<override>.log (posttrain_lab/status.py TRACKS)
+TAG="${TAG:-dpo}"   # logs_math_${TAG}_<override>[_seed<N>].log (posttrain_lab/status.py TRACKS)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source scripts/math/seed.sh
 NGPU="${NGPU:-4}"
 PORT_BASE="${PORT_BASE:-29500}"   # each run gets its own rendezvous port
 
@@ -25,12 +26,12 @@ reap() {  # wait on each launched run individually; a bare `wait` always returns
 i=0
 for ov in "${OVERRIDES[@]}"; do
   gpu=$((i % NGPU))
-  log="logs_math_${TAG}_${ov//[.=\/]/_}.log"
-  echo "[math-$TAG] launching $ov on GPU $gpu"
+  log="logs_math_${TAG}_${ov//[.=\/]/_}${SEED_LOG}.log"
+  echo "[math-$TAG] launching $ov on GPU $gpu (seed $SEED)"
   CUDA_VISIBLE_DEVICES=$gpu accelerate launch \
     --config_file configs/accelerate/zero2_1gpu.yaml \
     --main_process_port $((PORT_BASE + i)) \
-    --module posttrain_lab.train.dpo "$CFG" "$ov" "$@" \
+    --module posttrain_lab.train.dpo "$CFG" "$ov" "seed=$SEED" "$@" \
     > "$log" 2>&1 &
   pids+=("$!"); names+=("$ov ($log)")
   i=$((i + 1))
