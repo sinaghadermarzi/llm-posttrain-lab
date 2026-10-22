@@ -19,9 +19,12 @@ from posttrain_lab.eval import groups
 
 ROOT = Path(__file__).resolve().parents[1]
 OLD_ROW = {"run": "dpo_beta0.1_seed17", "arm": "dpo", "hyperparam": "beta0.1", "checkpoint": "x", "step": 58,
-           "kl_k3": 1.0, "kl_k1": 0.9, "pass1": 0.5, "pass8": 0.8, "num_samples": 512 * 8,
-           "ppl_wikitext": 12.0, "harness": {"arc_easy": 0.76}, "distinct_2": 0.6, "self_bleu": 0.4,
-           "logp_chosen": -33.0}
+           "kl_k3": 1.0, "kl_k1": 0.9, "pass1": 0.5, "pass8": 0.8, "pass_gap": 0.3, "num_samples": 512 * 8,
+           "mean_response_tokens": 130.0, "mean_token_nll": 0.4,
+           "ppl_wikitext": 12.0, "harness": {"arc_easy": 0.76}, "distinct_1": 0.3, "distinct_2": 0.6,
+           "distinct_3": 0.8, "self_bleu": 0.4, "logp_chosen": -33.0}
+OLD_PROMPT_KEYS = {"kl_k3", "kl_k1", "pass1", "pass8", "pass_gap", "num_samples", "mean_response_tokens",
+                   "mean_token_nll", "distinct_1", "distinct_2", "distinct_3", "self_bleu"}
 ALL = ["core_math", "retention_ppl", "retention_harness", "diversity", "pref_logps"]
 
 
@@ -126,7 +129,10 @@ def test_a_crash_after_resampling_never_keeps_old_diversity(fake_groups, tmp_pat
     with pytest.raises(RuntimeError):
         run_eval.evaluate_checkpoint(_cfg(tmp_path), ck, prompts)
     row = json.loads(row_path.read_text())
-    assert row["eval_prompts"] == 1319 and "distinct_2" not in row and "self_bleu" not in row
+    assert row["eval_prompts"] == 1319
+    # nothing of the old 512-prompt evaluation survives, not just the sentinels
+    assert not {"distinct_1", "distinct_2", "distinct_3", "self_bleu", "pass_gap", "mean_token_nll"} & set(row)
+    assert (row["ppl_wikitext"], row["logp_chosen"]) == (12.0, -33.0)
 
     run_eval.GROUPS["diversity"] = (groups.SENTINELS["diversity"], fake["diversity"])
     ran.clear()
@@ -195,3 +201,60 @@ def test_frontier_draws_error_bars_when_ses_exist(tmp_path: Path, monkeypatch) -
     plot_panel(ax, df, "pass1", "pass@1")
     assert ax.containers, "no error bars drawn"
     plt.close(fig)
+
+
+def test_recomputed_values_are_sent_to_mlflow_again(fake_groups, tmp_path: Path) -> None:
+    """The MLflow sidecar lists what was logged; the stale keys must leave it,
+    or _sync_tracking would keep MLflow on the 512-prompt numbers."""
+    run_eval, ran, _ = fake_groups
+    ck = _ckpt(tmp_path)
+    row_path = tmp_path / "eval" / "dpo_beta0.1_seed17" / "checkpoint-58.jsonl"
+    row_path.parent.mkdir(parents=True)
+    row_path.write_text(json.dumps(OLD_ROW) + "\n")
+    marker = row_path.with_suffix(".mlflow.json")
+    marker.write_text(json.dumps(sorted(set(OLD_ROW) - {"run", "arm", "hyperparam", "checkpoint", "step"})))
+    run_eval.evaluate_checkpoint(_cfg(tmp_path), ck, [{"prompt_id": f"gsm8k-{i}"} for i in range(1319)])
+    logged = set(json.loads(marker.read_text()))
+    assert not OLD_PROMPT_KEYS & logged
+    assert {"ppl_wikitext", "harness", "logp_chosen"} <= logged
+
+
+def test_group_outputs_cover_what_the_groups_write() -> None:
+    """GROUP_OUTPUTS must own every key core_math and diversity return."""
+    import ast
+
+    from posttrain_lab.eval import diversity, kl
+    from posttrain_lab.eval.passk import passk_metrics
+
+    tree = ast.parse(Path(kl.__file__).read_text())
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "compute_kl")
+    ret = [n for n in ast.walk(fn) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict)][-1]
+    kl_keys = {k.value for k in ret.value.keys if isinstance(k, ast.Constant)}
+    samples = [{"prompt_id": f"p{i % 3}", "response": "a b c d", "correct": i % 2 == 0} for i in range(12)]
+    passk_keys = set(passk_metrics(samples, 4))
+    core = {**dict.fromkeys(kl_keys | passk_keys), "num_samples": 1, "eval_prompts": 1, "ppl_wikitext": 1}
+    assert set(groups.group_keys(core, "core_math")) == kl_keys | passk_keys | {"num_samples", "eval_prompts"}
+    div = diversity.compute_group(None, None, {"load_samples": lambda: samples})
+    assert set(groups.group_keys({**div, "logp_chosen": 1}, "diversity")) == set(div)
+
+
+def test_compare_math_pairs_by_question_not_position(tmp_path: Path) -> None:
+    """gsm8k-<i> is a position: an old 512-prompt file and a new full-split file
+    give the same ids to different questions. Pairing must use the question."""
+    def write(path: Path, rows: list[tuple[str, str, int]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as f:
+            for pid, question, k in rows:
+                for j in range(8):
+                    f.write(json.dumps({"prompt_id": pid, "prompt": question, "correct": j < k}) + "\n")
+    ev = tmp_path / "eval"
+    write(ev / "dpo_beta0.3_seed17" / "checkpoint-116.samples.jsonl", [("gsm8k-0", "A", 2), ("gsm8k-1", "B", 4)])
+    # the full split puts other questions at those positions
+    write(ev / "grpo_beta0.01_seed17" / "checkpoint-374.samples.jsonl",
+          [("gsm8k-0", "X", 8), ("gsm8k-1", "A", 3), ("gsm8k-2", "B", 5)])
+    out = subprocess.run([sys.executable, str(ROOT / "analysis" / "compare_math.py"), str(tmp_path),
+                          "dpo_beta0.3@116", "grpo_beta0.01@374"], capture_output=True, text=True, cwd=ROOT / "analysis")
+    assert out.returncode == 0, out.stderr
+    paired = out.stdout.split("paired vs", 1)[1]
+    assert "share 2 questions" in paired                       # A and B, not positions 0 and 1
+    assert "+0.125 ± 0.000" in paired and "(2 prompts)" in paired
