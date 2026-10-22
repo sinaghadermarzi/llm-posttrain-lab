@@ -5,10 +5,18 @@
                      the whole preference distribution, unlike RL), one panel
                      per DPO-trained arm (DPO, DPO + NLL: the NLL term should
                      hold the chosen line up). Read from the
-                     trainer_state.json log history in each run.
+                     trainer_state.json log history in each run. With several
+                     training seeds every seed keeps its own line (one color
+                     and legend entry per β): each seed trains on its own
+                     pairs, so its runs log at different steps and run for a
+                     different number of them, and a mean would have to
+                     interpolate between logged steps.
   diagnostics.png  — panels against KL: response length (length hacking),
                      policy token entropy (mode collapse), and (helpful: two
                      graders) the train-RM-minus-judge z-gap (reward hacking).
+                     With several training seeds: seed means per (arm,
+                     hyperparam, checkpoint index) with across-seed SE bars
+                     on both axes (aggregate.py:seed_view).
 
 Usage: python analysis/diagnostics.py [results_root]
 """
@@ -22,9 +30,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from aggregate import seed_view, seeds_caption
 from paths import default_root  # also puts src/ on sys.path
 from posttrain_lab.utils.checkpoints import list_checkpoints
-from style import BLUE_RAMP, INK, KL_COL, METHOD_COLORS, METHOD_LABELS, apply_style, kl_axis, marker_for
+from style import BLUE_RAMP, INK, KL_COL, METHOD_COLORS, METHOD_LABELS, apply_style, errorbars, kl_axis, marker_for
 
 
 DPO_ARMS = ["dpo", "dpo-nll"]  # arms trained by train/dpo.py (run dirs <arm>_beta*_seed*)
@@ -47,7 +56,10 @@ def dpo_logp_trajectories(results_root: Path, out_dir: Path) -> None:
 
 
 def _dpo_logps_panel(ax, arm: str, runs: list[Path]) -> None:
-    for i, run in enumerate(runs):
+    # color (and legend entry, label) per beta, so the seeds of one beta read as one series
+    betas = list(dict.fromkeys(run.name.split("_")[1] for run in runs))
+    labeled: set[str] = set()
+    for run in runs:
         # numeric step order: as strings, checkpoint-800 sorts after checkpoint-1000
         states = [c / "trainer_state.json" for c in list_checkpoints(run) if (c / "trainer_state.json").exists()]
         if not states:
@@ -57,24 +69,31 @@ def _dpo_logps_panel(ax, arm: str, runs: list[Path]) -> None:
         if not rows:
             continue
         steps = [h["step"] for h in rows]
-        color = BLUE_RAMP[i % len(BLUE_RAMP)]
-        beta = run.name.split("_")[1].replace("beta", "β=")
+        key = run.name.split("_")[1]
+        color = BLUE_RAMP[betas.index(key) % len(BLUE_RAMP)]
+        beta = key.replace("beta", "β=")
+        first = key not in labeled
+        labeled.add(key)
         # markers so a run with a single logged step (e.g. smoke) still shows
         ax.plot(steps, [h["logps/chosen"] for h in rows], color=color, marker="o", markersize=3,
-                label=f"{beta} chosen")
+                label=f"{beta} chosen" if first else None)
         ax.plot(steps, [h["logps/rejected"] for h in rows], color=color, marker="o", markersize=3,
                 linestyle="--", alpha=0.7)
-        ax.annotate(beta, (steps[-1], rows[-1]["logps/chosen"]),
-                    textcoords="offset points", xytext=(5, 0), fontsize=8, color=INK)
+        if first:
+            ax.annotate(beta, (steps[-1], rows[-1]["logps/chosen"]),
+                        textcoords="offset points", xytext=(5, 0), fontsize=8, color=INK)
     ax.set_xlabel("training step")
     ax.set_ylabel("mean log-prob of completion")
-    ax.set_title(f"{METHOD_LABELS.get(arm, arm)}: chosen (solid) and rejected (dashed) log-probs", fontsize=11)
+    title = f"{METHOD_LABELS.get(arm, arm)}: chosen (solid) and rejected (dashed) log-probs"
+    if len({run.name.rsplit("_seed", 1)[-1] for run in runs}) > 1:
+        title += "\none line per training seed"
+    ax.set_title(title, fontsize=11)
     if ax.get_lines():
         ax.legend(fontsize=8, ncol=2)
 
 
 def kl_diagnostics(results_root: Path, out_dir: Path) -> None:
-    df = pd.read_csv(results_root / "frontier.csv")
+    df, seeds = seed_view(pd.read_csv(results_root / "frontier.csv"))
     panels = [
         ("mean_response_tokens", "response length (tokens)", "Length vs KL"),
         ("mean_token_nll", "token NLL (entropy est., nats)", "Entropy vs KL"),
@@ -91,10 +110,14 @@ def kl_diagnostics(results_root: Path, out_dir: Path) -> None:
             color = METHOD_COLORS.get(arm, INK)
             ax.scatter(arm_df[KL_COL], arm_df[col], color=color, marker=marker_for(arm),
                        s=90 if arm == "sft-base" else 30, label=arm, alpha=0.85)
+            if len(seeds) > 1:
+                errorbars(ax, arm_df, col, color)
         kl_axis(ax)
         ax.set_ylabel(ylabel)
         ax.set_title(title, fontsize=11)
     axes[0].legend(fontsize=8)
+    if len(seeds) > 1:
+        fig.suptitle(seeds_caption(seeds), fontsize=11)
     fig.tight_layout()
     fig.savefig(out_dir / "diagnostics.png")
     print(f"wrote {out_dir}/diagnostics.png")

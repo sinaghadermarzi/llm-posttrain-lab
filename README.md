@@ -270,8 +270,17 @@ mixed up. Per-run logs of a seed other than 17 end in `_seedN`
 - **`figures/frontier_math.png`.** With one seed it is unchanged. With more
   than one, it draws one curve per (arm, β) through the seed means, with
   across-seed error bars on both pass@k and KL.
-- **The other figures** (diversity, retention, pref_logps, diagnostics) still
-  draw every run, so each seed shows up as its own curve.
+- **The other figures** (`diversity.png`, `retention.png`, `pref_logps.png`,
+  `diagnostics.png`) work the same way. With one seed they are unchanged.
+  With more than one, each point is the seed mean of an (arm, β) at one
+  checkpoint index, with across-seed error bars. The KL scatters get bars on
+  both axes. `pref_logps.png` draws one chosen/rejected curve pair per
+  (arm, β) at the mean of the seeds' steps, with bars on the log-probs.
+- **`figures/dpo_logps.png`** reads each run's training log, and it keeps one
+  line per seed. Each seed's DPO runs log at their own steps and train for a
+  different number of them, so a mean would have to interpolate. Each β gets
+  one color and one legend entry, so the spread between a β's lines is the
+  seed-to-seed variation.
 - **`compare_math.py`.** Pick one seed with `--seed 18` (or name the run in
   full, `dpo_beta0.3_seed18@last`). Or pool them with `--pool`: that prints the
   paired difference per seed, then their mean with a 95% CI from the spread
