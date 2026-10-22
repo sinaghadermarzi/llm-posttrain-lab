@@ -1009,6 +1009,9 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage, seeds: list[i
         job_task = next((a.split("=", 1)[1] for a in job.args if a.startswith("task=")), "helpful")
         if job_task != task:
             continue
+        job_seed = arg_seed(job.args)
+        if seeds and (base_seed() if job_seed is None else job_seed) not in seeds:
+            continue  # another seed's eval (run_eval evaluates only its config seed's runs)
         shard = job.shard or "0/1"
         log = Path(job.log) if job.log else REPO_ROOT / log_name(stage.log or "", shard=int(shard.split("/")[0]),
                                                                  seed=arg_seed(job.args))
@@ -1080,6 +1083,9 @@ def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict
         head, section = last_section(tail_text(Path(candidate)), plan["prefix"])
         if head is None:
             continue  # no header of this track: another track's log
+        tag = SEED_TAG_RE.search(head)
+        if tag and int(tag[1]) not in seeds and candidate != log_override:
+            continue  # another seed's run (math-all-seed18.log under --seed 17)
         driver_log, header = Path(candidate), head
         section_lines = log_lines(section)
         driver_errors = summarize_errors(section_lines)
@@ -1448,7 +1454,9 @@ def resume_target(track: dict) -> str:
         for seed, (complete, total) in ((stage.get("eval") or {}).get("per_seed") or {}).items():
             if complete < total:
                 seeds.add(int(seed))
-    seeds = sorted(seeds) or [base_seed()]
+    if not seeds:  # every run and checkpoint is done: only the figures are left
+        return "make math-plots"
+    seeds = sorted(seeds)
     if seeds == [base_seed()]:
         return "make math-all"
     if len(seeds) == 1:
