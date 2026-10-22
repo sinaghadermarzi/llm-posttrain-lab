@@ -6,9 +6,9 @@
                      per DPO-trained arm (DPO, DPO + NLL: the NLL term should
                      hold the chosen line up). Read from the
                      trainer_state.json log history in each run.
-  diagnostics.png  — 3 panels against KL: response length (length hacking),
-                     policy token entropy (mode collapse), and the
-                     train-RM-minus-judge z-gap (reward hacking).
+  diagnostics.png  — panels against KL: response length (length hacking),
+                     policy token entropy (mode collapse), and (helpful: two
+                     graders) the train-RM-minus-judge z-gap (reward hacking).
 
 Usage: python analysis/diagnostics.py [results_root]
 """
@@ -78,9 +78,14 @@ def kl_diagnostics(results_root: Path, out_dir: Path) -> None:
     panels = [
         ("mean_response_tokens", "response length (tokens)", "Length vs KL"),
         ("mean_token_nll", "token NLL (entropy est., nats)", "Entropy vs KL"),
-        ("rm_gap_z", "train-RM z − judge z", "Reward hacking gap vs KL"),
+        ("rm_gap_z", "train-RM z − judge z", "Reward hacking gap vs KL"),  # helpful only (two graders)
     ]
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    panels = [p for p in panels if p[0] in df.columns and df[p[0]].notna().any()]
+    if not panels:
+        print("no length/entropy/reward-gap columns in frontier.csv, skipping diagnostics figure")
+        return
+    fig, axes = plt.subplots(1, len(panels), figsize=(4.3 * len(panels), 4), squeeze=False)
+    axes = list(axes[0])
     for ax, (col, ylabel, title) in zip(axes, panels):
         for arm, arm_df in df.groupby("arm"):
             color = METHOD_COLORS.get(arm, INK)

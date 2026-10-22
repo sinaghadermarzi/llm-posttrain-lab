@@ -88,5 +88,6 @@ python analysis/frontier_math.py "$ROOT"
 python analysis/diversity_plot.py "$ROOT"
 python analysis/retention_plot.py "$ROOT"
 python analysis/pref_logps_plot.py "$ROOT"
+python analysis/diagnostics.py "$ROOT"
 
 echo "SMOKE OK — figures under $(dirname "$ROOT")/{helpful,math}/figures/"
