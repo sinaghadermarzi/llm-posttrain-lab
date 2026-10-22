@@ -12,6 +12,25 @@ SENTINELS: dict[str, list[str]] = {
     "pref_logps": ["logp_chosen"],
 }
 
+# every key each prompt-dependent group writes (fnmatch patterns: pass* covers
+# pass1, pass8, pass_gap and their _se); invalidating a stale group removes all
+# of them, so a row never mixes old-prompt and new-prompt numbers
+GROUP_OUTPUTS: dict[str, list[str]] = {
+    "core": ["kl_*", "mean_response_tokens", "mean_token_nll", "reward_train_rm", "reward_judge", "num_samples",
+             "eval_prompts"],
+    "core_math": ["kl_*", "mean_response_tokens", "mean_token_nll", "pass*", "num_samples", "eval_prompts"],
+    "diversity": ["distinct_*", "self_bleu"],
+}
+
+
+def group_keys(row: dict, group: str) -> list[str]:
+    """The row's keys a group wrote (its sentinels at least)."""
+    from fnmatch import fnmatchcase
+
+    patterns = GROUP_OUTPUTS.get(group, []) + SENTINELS[group]
+    return [k for k in row if any(fnmatchcase(k, p) for p in patterns)]
+
+
 # groups computed from this checkpoint's samples on the eval prompts: they
 # are stale when the row was evaluated on a different number of prompts
 # (e.g. math moved from a 512-prompt subsample to the full 1319-prompt test set)
