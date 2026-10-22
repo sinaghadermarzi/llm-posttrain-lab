@@ -21,7 +21,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from paths import default_root
-from style import INK, KL_COL, METHOD_COLORS, METHOD_LABELS, METHOD_LINESTYLES, apply_style, kl_axis, marker_for
+from style import (INK, KL_COL, METHOD_COLORS, METHOD_LABELS, METHOD_LINESTYLES, apply_style, errorbars, kl_axis,
+                   marker_for)
 
 
 def label_for(run_df: pd.DataFrame) -> str:
@@ -29,18 +30,6 @@ def label_for(run_df: pd.DataFrame) -> str:
     if pd.isna(hp) or hp is None:
         return ""
     return str(hp).replace("beta", "β=").replace("kl", "c=")
-
-
-def _errorbars(ax, run_df: pd.DataFrame, ycol: str, color: str) -> None:
-    """Thin bars behind the curve: <ycol>_se (math pass@k: SE over prompts,
-    eval/passk.py; or across seeds, frontier_math.py) and, where present,
-    <KL_COL>_se on x (across seeds)."""
-    yerr = run_df[f"{ycol}_se"] if f"{ycol}_se" in run_df.columns else None
-    xerr = run_df[f"{KL_COL}_se"] if f"{KL_COL}_se" in run_df.columns else None
-    if not any(e is not None and e.notna().any() for e in (yerr, xerr)):
-        return
-    ax.errorbar(run_df[KL_COL], run_df[ycol], yerr=yerr, xerr=xerr, fmt="none", ecolor=color,
-                elinewidth=0.8, alpha=0.45, capsize=0, zorder=1)
 
 
 def plot_panel(ax, df: pd.DataFrame, ycol: str, title: str) -> None:
@@ -53,11 +42,11 @@ def plot_panel(ax, df: pd.DataFrame, ycol: str, title: str) -> None:
         if arm == "sft-base":
             ax.plot(run_df[KL_COL], run_df[ycol], marker="*", markersize=14,
                     linestyle="none", color=color, zorder=5)
-            _errorbars(ax, run_df, ycol, color)
+            errorbars(ax, run_df, ycol, color)
             continue
         ax.plot(run_df[KL_COL], run_df[ycol], marker=marker_for(arm), color=color, alpha=0.85,
                 linestyle=METHOD_LINESTYLES.get(arm, "-"))
-        _errorbars(ax, run_df, ycol, color)
+        errorbars(ax, run_df, ycol, color)
         last = run_df.iloc[-1]
         text = label_for(run_df)
         if text:

@@ -295,7 +295,11 @@ def _row(run: str, step: int, kl: float, pass1: float) -> dict:
     hp = rest[0] if len(rest) > 1 else None
     return {"run": run, "arm": arm, "hyperparam": hp, "checkpoint": f"x/{run}/checkpoint-{step}", "step": step,
             "kl_k1": kl, "kl_k3": kl, "pass1": pass1, "pass1_se": 0.01, "pass8": pass1 + 0.3, "pass8_se": 0.01,
-            "num_samples": 8, "eval_prompts": 1}
+            "num_samples": 8, "eval_prompts": 1, "pass_gap": 0.3,
+            # the other figures' metrics, each a function of kl so the seed mean is easy to check
+            "distinct_2": 0.9 - kl / 10, "self_bleu": 0.1 + kl / 10, "mean_token_nll": 0.5 - kl / 10,
+            "mean_response_tokens": 100 + 10 * kl, "ppl_wikitext": 10 + kl, "logp_chosen": -50 - kl,
+            "logp_rejected": -60 - 2 * kl}
 
 
 def _eval_tree(root: Path, seeds=(17, 18)) -> None:
@@ -348,18 +352,21 @@ def test_aggregate_with_one_seed(tmp_path: Path) -> None:
     assert (means["n_seeds"] == 1).all() and means["pass1_seed_se"].isna().all()
 
 
-def _plot(tmp_path: Path, monkeypatch):
+def _plot(tmp_path: Path, monkeypatch, script: str = "frontier_math"):
+    """Run analysis/<script>.py on tmp_path; the last figure it drew."""
+    import importlib
+
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     monkeypatch.syspath_prepend(str(ROOT / "analysis"))
-    import frontier_math
+    module = importlib.import_module(script)
 
-    monkeypatch.setattr(sys, "argv", ["frontier_math.py", str(tmp_path)])
+    monkeypatch.setattr(sys, "argv", [f"{script}.py", str(tmp_path)])
     plt.close("all")
-    frontier_math.main()
+    module.main()
     return plt.gcf()
 
 
@@ -385,6 +392,137 @@ def test_frontier_with_one_seed_draws_every_run(tmp_path: Path, monkeypatch) -> 
     assert all(not c.has_xerr for c in ax.containers)                  # prompt SEs on y only, as before
     dpo = [ln for ln in ax.get_lines() if ln.get_color() == "#1baf7a" and len(ln.get_xdata()) > 1]
     assert list(dpo[0].get_xdata()) == pytest.approx([1.0, 2.0])
+
+
+# the other figures: seed means and across-seed bars with several seeds, every run with one
+
+
+# (script, a panel title, that panel's seed-mean DPO y values: self_bleu = 0.1 + kl/10, ppl = 10 + kl,
+# length = 100 + 10 kl, averaged over seed 17's and seed 18's (kl + 0.2) checkpoints)
+SCATTER_FIGURES = [("diversity_plot", "Sample convergence", [0.21, 0.31]), ("retention_plot", "LM erosion", [11.1, 12.1]),
+                   ("diagnostics", "Length vs KL", [111.0, 121.0])]
+
+
+def _scatter(ax, arm: str) -> list[tuple[float, float]]:
+    return [tuple(xy) for c in ax.collections if c.get_label() == arm for xy in c.get_offsets()]
+
+
+@pytest.mark.parametrize("script,panel,expected", SCATTER_FIGURES)
+def test_scatter_figures_plot_the_seed_mean_with_error_bars(tmp_path: Path, monkeypatch, script: str, panel: str,
+                                                             expected: list[float]) -> None:
+    _eval_tree(tmp_path)
+    _aggregate(tmp_path)
+    fig = _plot(tmp_path, monkeypatch, script)
+    assert fig._suptitle.get_text() == "mean ± SE over seeds 17, 18"
+    for ax in fig.axes:
+        dpo = sorted(_scatter(ax, "dpo"))
+        assert len(dpo) == 2                                            # one point per checkpoint index, not per seed
+        assert [x for x, _ in dpo] == pytest.approx([1.1, 2.1])
+        assert len(_scatter(ax, "sft-base")) == 1
+        bars = [c for c in ax.containers if c.has_xerr and c.has_yerr]
+        assert bars, f"{script}: no across-seed error bars on both axes in {ax.get_title()!r}"
+    ax = next(ax for ax in fig.axes if ax.get_title() == panel)
+    assert [y for _, y in sorted(_scatter(ax, "dpo"))] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("script", [s for s, _, _ in SCATTER_FIGURES])
+def test_scatter_figures_with_one_seed_draw_every_checkpoint(tmp_path: Path, monkeypatch, script: str) -> None:
+    _eval_tree(tmp_path, seeds=(17,))
+    _aggregate(tmp_path)
+    fig = _plot(tmp_path, monkeypatch, script)
+    assert fig._suptitle is None
+    for ax in fig.axes:
+        assert not ax.containers                                        # no error bars, as before
+        assert sorted(x for x, _ in _scatter(ax, "dpo")) == pytest.approx([1.0, 2.0])
+
+
+def test_scatter_figures_with_two_seeds_and_no_seed_column(tmp_path: Path, monkeypatch) -> None:
+    """A frontier.csv written before the seed columns existed: the run names still tell the seeds apart."""
+    _eval_tree(tmp_path)
+    _aggregate(tmp_path)
+    df = pd.read_csv(tmp_path / "frontier.csv")
+    df.drop(columns=["seed", "ckpt_index"]).to_csv(tmp_path / "frontier.csv", index=False)
+    fig = _plot(tmp_path, monkeypatch, "diversity_plot")
+    assert sorted(x for x, _ in _scatter(fig.axes[0], "dpo")) == pytest.approx([1.1, 2.1])
+
+
+def _logp_lines(fig, arm_title: str):
+    ax = next(ax for ax in fig.axes if ax.get_title() == arm_title)
+    return ax, [ln for ln in ax.get_lines() if ln.get_linestyle() in ("-", "--") and len(ln.get_xdata()) > 1]
+
+
+def test_pref_logps_plots_the_seed_mean_by_checkpoint_index(tmp_path: Path, monkeypatch) -> None:
+    _eval_tree(tmp_path)
+    _aggregate(tmp_path)
+    fig = _plot(tmp_path, monkeypatch, "pref_logps_plot")
+    assert "mean ± SE over seeds 17, 18" in fig._suptitle.get_text()
+    ax, lines = _logp_lines(fig, "DPO")
+    assert len(lines) == 2                                              # one chosen + one rejected, not per seed
+    chosen = next(ln for ln in lines if ln.get_linestyle() == "-")
+    assert list(chosen.get_xdata()) == pytest.approx([10.5, 21.0])     # steps 10/11 and 20/22: matched by index
+    assert list(chosen.get_ydata()) == pytest.approx([-51.1, -52.1])
+    assert ax.get_xlabel() == "training step (mean over seeds)"
+    assert len([c for c in ax.containers if c.has_yerr]) == 2
+    base = [ln for ln in ax.get_lines() if ln.get_linestyle() == ":"]
+    assert base[0].get_ydata()[0] == pytest.approx(-50.0)              # pi_SFT: the mean of both seeds' (kl 0)
+
+
+def test_pref_logps_with_one_seed_draws_every_run(tmp_path: Path, monkeypatch) -> None:
+    _eval_tree(tmp_path, seeds=(17,))
+    _aggregate(tmp_path)
+    fig = _plot(tmp_path, monkeypatch, "pref_logps_plot")
+    assert "seeds" not in fig._suptitle.get_text()
+    ax, lines = _logp_lines(fig, "DPO")
+    assert [list(ln.get_xdata()) for ln in lines] == [[10, 20], [10, 20]]
+    assert ax.get_xlabel() == "training step" and not ax.containers
+
+
+def _dpo_run(root: Path, name: str, steps: list[int]) -> None:
+    d = root / "runs" / name / f"checkpoint-{steps[-1]}"
+    d.mkdir(parents=True)
+    history = [{"step": s, "logps/chosen": -100.0 - s, "logps/rejected": -90.0 - 2 * s} for s in steps]
+    (d / "trainer_state.json").write_text(json.dumps({"log_history": history}))
+
+
+def _dpo_logps(tmp_path: Path, monkeypatch, seeds) -> list:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    monkeypatch.syspath_prepend(str(ROOT / "analysis"))
+    import diagnostics
+
+    for seed in seeds:
+        steps = [10, 20] if seed == 17 else [10, 20, 30]                 # each seed's own pairs: its own length
+        for beta in ("0.1", "0.3"):
+            _dpo_run(tmp_path, f"dpo_beta{beta}_seed{seed}", steps)
+    plt.close("all")
+    (tmp_path / "figures").mkdir()
+    diagnostics.dpo_logp_trajectories(tmp_path, tmp_path / "figures")
+    return plt.gcf().axes[0]
+
+
+def test_dpo_logps_keeps_a_line_per_seed_colored_by_beta(tmp_path: Path, monkeypatch) -> None:
+    ax = _dpo_logps(tmp_path, monkeypatch, (17, 18))
+    lines = ax.get_lines()
+    assert len(lines) == 2 * 2 * 2                                      # beta x seed x (chosen, rejected)
+    by_color: dict[str, set[int]] = {}
+    for ln in lines:
+        by_color.setdefault(ln.get_color(), set()).add(len(ln.get_xdata()))
+    assert len(by_color) == 2 and all(lengths == {2, 3} for lengths in by_color.values())   # both seeds per beta
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ["β=0.1 chosen", "β=0.3 chosen"]
+    assert ax.get_title().endswith("one line per training seed")
+    assert [t.get_text() for t in ax.texts] == ["β=0.1", "β=0.3"]
+
+
+def test_dpo_logps_with_one_seed_is_unchanged(tmp_path: Path, monkeypatch) -> None:
+    ax = _dpo_logps(tmp_path, monkeypatch, (17,))
+    from style import BLUE_RAMP
+
+    assert [ln.get_color() for ln in ax.get_lines()] == [BLUE_RAMP[0]] * 2 + [BLUE_RAMP[1]] * 2
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ["β=0.1 chosen", "β=0.3 chosen"]
+    assert ax.get_title() == "DPO: chosen (solid) and rejected (dashed) log-probs"
 
 
 def _samples(path: Path, solved: dict[str, int], kl: float = 1.0) -> None:
