@@ -1,6 +1,6 @@
 """THE figure: reward vs KL(policy || pi_SFT) frontier.
 
-Two panels, one shared x (sequence KL in nats): the held-out judge (the
+Two panels, one shared x (sequence KL in nats, k1): the held-out judge (the
 honest scoreboard, left) and the training RM (the optimized objective,
 right). Each run is one curve through its checkpoints in training order;
 color = method, direct label = the run's KL-knob value at the curve end.
@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from paths import default_root
-from style import INK, METHOD_COLORS, METHOD_LABELS, apply_style
+from style import INK, KL_COL, METHOD_COLORS, METHOD_LABELS, METHOD_LINESTYLES, apply_style, kl_axis, marker_for
 
 
 def label_for(run_df: pd.DataFrame) -> str:
@@ -39,16 +39,17 @@ def plot_panel(ax, df: pd.DataFrame, ycol: str, title: str) -> None:
         arm = run_df["arm"].iloc[0]
         color = METHOD_COLORS.get(arm, INK)
         if arm == "sft-base":
-            ax.plot(run_df["kl_k3"], run_df[ycol], marker="*", markersize=14,
+            ax.plot(run_df[KL_COL], run_df[ycol], marker="*", markersize=14,
                     linestyle="none", color=color, zorder=5)
             continue
-        ax.plot(run_df["kl_k3"], run_df[ycol], marker="o", color=color, alpha=0.85)
+        ax.plot(run_df[KL_COL], run_df[ycol], marker=marker_for(arm), color=color, alpha=0.85,
+                linestyle=METHOD_LINESTYLES.get(arm, "-"))
         last = run_df.iloc[-1]
         text = label_for(run_df)
         if text:
-            ax.annotate(text, (last["kl_k3"], last[ycol]), textcoords="offset points",
+            ax.annotate(text, (last[KL_COL], last[ycol]), textcoords="offset points",
                         xytext=offsets[i % len(offsets)], fontsize=8, color=INK)
-    ax.set_xlabel("KL(policy ‖ π_SFT)  [nats/sequence, k3]")
+    kl_axis(ax)
     ax.set_ylabel(f"{title}  [z vs π_SFT]")
     ax.set_title(title, fontsize=11)
 
@@ -63,8 +64,8 @@ def main() -> None:
     plot_panel(axes[1], df, "reward_train_rm_z", "Training RM reward (optimized)")
 
     handles = [
-        plt.Line2D([], [], color=METHOD_COLORS[m], marker="*" if m == "sft-base" else "o",
-                   linestyle="none" if m == "sft-base" else "-", label=METHOD_LABELS[m])
+        plt.Line2D([], [], color=METHOD_COLORS[m], marker=marker_for(m),
+                   linestyle="none" if m == "sft-base" else METHOD_LINESTYLES.get(m, "-"), label=METHOD_LABELS[m])
         for m in METHOD_COLORS
         if (df["arm"] == m).any()
     ]

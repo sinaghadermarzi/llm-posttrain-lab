@@ -20,7 +20,7 @@ import pandas as pd
 
 from paths import default_root
 from frontier_plot import plot_panel
-from style import METHOD_COLORS, METHOD_LABELS, apply_style
+from style import METHOD_COLORS, METHOD_LABELS, METHOD_LINESTYLES, apply_style, marker_for
 
 
 def main() -> None:
@@ -39,8 +39,8 @@ def main() -> None:
         ax.set_ylabel(ax.get_ylabel().replace("  [z vs π_SFT]", ""))
 
     handles = [
-        plt.Line2D([], [], color=METHOD_COLORS[m], marker="*" if m == "sft-base" else "o",
-                   linestyle="none" if m == "sft-base" else "-", label=METHOD_LABELS[m])
+        plt.Line2D([], [], color=METHOD_COLORS[m], marker=marker_for(m),
+                   linestyle="none" if m == "sft-base" else METHOD_LINESTYLES.get(m, "-"), label=METHOD_LABELS[m])
         for m in METHOD_COLORS
         if (df["arm"] == m).any()
     ]

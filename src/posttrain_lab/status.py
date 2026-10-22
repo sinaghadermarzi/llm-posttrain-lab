@@ -73,6 +73,8 @@ TRACKS: dict[str, dict] = {
             Stage("m2", "self-generated pairs", "pairs", "math/m2_gen_pairs.yaml", gpus="1"),
             Stage("m3a", "SFT arm", "train", "math/m3_arm_sft.yaml"),
             Stage("m3b", "DPO sweep", "train", "math/m3_arm_dpo.yaml", "dpo", "logs_math_dpo_{ov}.log", "1 each"),
+            Stage("m3c", "DPO+NLL sweep", "train", "math/m3_arm_dpo_nll.yaml", "dpo_nll", "logs_math_dponll_{ov}.log",
+                  "1 each"),
             Stage("m3d", "GRPO sweep", "train", "math/m3_arm_grpo.yaml", "grpo"),
             Stage("m4", "eval", "eval", log="logs_math_eval_shard{i}.log", gpus="1 each"),
             Stage("m5", "aggregate + figures", "figures", gpus="0"),
