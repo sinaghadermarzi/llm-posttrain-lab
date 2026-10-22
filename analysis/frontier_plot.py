@@ -31,6 +31,18 @@ def label_for(run_df: pd.DataFrame) -> str:
     return str(hp).replace("beta", "β=").replace("kl", "c=")
 
 
+def _errorbars(ax, run_df: pd.DataFrame, ycol: str, color: str) -> None:
+    """Thin bars behind the curve: <ycol>_se (math pass@k: SE over prompts,
+    eval/passk.py; or across seeds, frontier_math.py) and, where present,
+    <KL_COL>_se on x (across seeds)."""
+    yerr = run_df[f"{ycol}_se"] if f"{ycol}_se" in run_df.columns else None
+    xerr = run_df[f"{KL_COL}_se"] if f"{KL_COL}_se" in run_df.columns else None
+    if not any(e is not None and e.notna().any() for e in (yerr, xerr)):
+        return
+    ax.errorbar(run_df[KL_COL], run_df[ycol], yerr=yerr, xerr=xerr, fmt="none", ecolor=color,
+                elinewidth=0.8, alpha=0.45, capsize=0, zorder=1)
+
+
 def plot_panel(ax, df: pd.DataFrame, ycol: str, title: str) -> None:
     # stagger direct labels so runs that end nearby don't collide
     offsets = [(6, 4), (6, -12), (6, 14), (-2, -16), (6, 24)]
@@ -41,16 +53,11 @@ def plot_panel(ax, df: pd.DataFrame, ycol: str, title: str) -> None:
         if arm == "sft-base":
             ax.plot(run_df[KL_COL], run_df[ycol], marker="*", markersize=14,
                     linestyle="none", color=color, zorder=5)
-            if f"{ycol}_se" in run_df.columns and run_df[f"{ycol}_se"].notna().any():
-                ax.errorbar(run_df[KL_COL], run_df[ycol], yerr=run_df[f"{ycol}_se"], fmt="none", ecolor=color,
-                            elinewidth=0.8, alpha=0.45, capsize=0, zorder=1)
+            _errorbars(ax, run_df, ycol, color)
             continue
         ax.plot(run_df[KL_COL], run_df[ycol], marker=marker_for(arm), color=color, alpha=0.85,
                 linestyle=METHOD_LINESTYLES.get(arm, "-"))
-        se = f"{ycol}_se"  # math pass@k: SE over prompts (eval/passk.py); thin, behind the curve
-        if se in run_df.columns and run_df[se].notna().any():
-            ax.errorbar(run_df[KL_COL], run_df[ycol], yerr=run_df[se], fmt="none", ecolor=color,
-                        elinewidth=0.8, alpha=0.45, capsize=0, zorder=1)
+        _errorbars(ax, run_df, ycol, color)
         last = run_df.iloc[-1]
         text = label_for(run_df)
         if text:

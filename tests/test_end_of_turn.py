@@ -214,7 +214,8 @@ def test_pairs_take_only_finished_correct_answers() -> None:
 def test_launchers_gate_on_the_base_sft(script: str) -> None:
     text = (Path(__file__).resolve().parents[1] / "scripts" / script).read_text()
     sft = text.index("_sft_base.sh" if "helpful" in script else "m1_sft_gold.sh")
-    gate = text.index('python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17"')
+    seed = "$SEED" if "math" in script else "17"  # the math track runs one seed per call (scripts/math/seed.sh)
+    gate = text.index(f'python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed{seed}"')
     assert sft < gate < text.index("=== ", sft)  # right after pi_SFT, before the next stage
     yaml = "configs/helpful/stage1_sft_base.yaml" if "helpful" in script else "configs/math/m1_sft_gold.yaml"
     assert text[gate:].splitlines()[0].endswith(f"--probe {yaml}")  # and it measures, not only reads config

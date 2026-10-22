@@ -15,8 +15,11 @@ atomically rewritten after every group, so:
 Usage:
     python -m posttrain_lab.eval.run_eval [task=math] [--smoke] [--shard i/n] [k=v ...] [ckpt_dir ...]
 
-With no explicit checkpoint dirs, discovers every policy checkpoint under
-<results_root>/runs (all arms + sft-base, excluding the RM). --shard i/n
+With no explicit checkpoint dirs, discovers every policy checkpoint of the
+config's seed (seed=N, default configs/base.yaml) under <results_root>/runs
+(all arms + sft-base, excluding the RM): the KL reference (pi_SFT), the
+pref_logps pairs and the sampling seed all follow cfg.seed, so another seed's
+runs are evaluated by a run with that seed (scripts/math/m4_eval.sh SEED=N). --shard i/n
 keeps every n-th checkpoint starting at i (used by the eval scripts to
 spread checkpoints across GPUs; safe because groups touch one row each).
 """
@@ -38,7 +41,8 @@ from posttrain_lab.eval.kl import compute_kl
 from posttrain_lab.eval.passk import passk_metrics
 from posttrain_lab.eval.reward_score import score_samples
 from posttrain_lab.tasks.gsm8k import is_correct
-from posttrain_lab.utils.checkpoints import discover_all_checkpoints, list_checkpoints, run_arm, run_hyperparam
+from posttrain_lab.utils.checkpoints import (discover_all_checkpoints, list_checkpoints, run_arm, run_hyperparam,
+                                            run_seed)
 from posttrain_lab.utils.logging import log_eval_metrics, tracking_enabled
 
 
@@ -235,13 +239,18 @@ def main() -> None:
 
     if explicit:
         ckpts = [Path(p) for p in explicit]
+        for ckpt in ckpts:
+            seed = run_seed(ckpt.parent if ckpt.name.startswith("checkpoint-") else ckpt)
+            if seed is not None and seed != int(cfg.seed):
+                sys.exit(f"[eval] {ckpt} is a seed-{seed} run but the config's seed is {cfg.seed}: its KL "
+                         f"reference and pref_logps pairs would be seed {cfg.seed}'s; pass seed={seed}")
     else:
-        ckpts = discover_all_checkpoints(Path(cfg.results_root) / "runs")
+        ckpts = discover_all_checkpoints(Path(cfg.results_root) / "runs", seeds=[int(cfg.seed)])
     ckpts = [c for i, c in enumerate(ckpts) if i % shard_total == shard_idx]
     if not ckpts:
         print("[eval] no checkpoints found — train something first")
         return
-    print(f"[eval] task={cfg.task}: {len(ckpts)} checkpoints (shard {shard_idx}/{shard_total}), "
+    print(f"[eval] task={cfg.task} seed={cfg.seed}: {len(ckpts)} checkpoints (shard {shard_idx}/{shard_total}), "
           f"groups={list(cfg.eval.metric_groups)}")
 
     prompts = eval_prompts(cfg)

@@ -1,8 +1,8 @@
 """Pipeline status: where each track is, what is running, and what needs attention.
 
-    python -m posttrain_lab.status [math|helpful|all] [--smoke] [--json]
+    python -m posttrain_lab.status [math|helpful|all] [--smoke] [--json] [--seed N ...]
                                    [--watch SEC] [--log PATH] [--no-color]
-    make status [TASK=math]
+    make status [TASK=math] [STATUS_ARGS="--seed 18"]
 
 For every stage of a track (in run_all_<task>.sh order) it shows whether the
 run is DONE, RUNNING, STOPPED (output exists but no DONE marker and nothing
@@ -18,7 +18,9 @@ running: crashed or killed) or pending, and for each run:
 plus the GPUs (now, and the history in gpu_util.csv if the logger is
 running), disk space, errors found in the logs, and an "attention" list of
 everything that looks wrong. Expected runs come from the stage configs and
-sweeps.yaml, so this follows the configs when they change.
+sweeps.yaml, so this follows the configs when they change. Every training
+seed present in the results tree (run dirs *_seed<N>, a running job's seed=N)
+gets its own runs, next to the configs' default seed; --seed N shows only N.
 
 Read-only and quick: it never imports torch, datasets or vLLM. --json prints
 the same information as one JSON document.
@@ -29,6 +31,7 @@ from __future__ import annotations
 import argparse
 import ast
 import csv
+import functools
 import json
 import os
 import re
@@ -46,7 +49,7 @@ from omegaconf import OmegaConf
 from posttrain_lab.config import CONFIG_DIR, load_config
 from posttrain_lab.eval.groups import SENTINELS, missing_groups
 from posttrain_lab.utils.chat import PROBE_FILE, PROBE_MIN_P
-from posttrain_lab.utils.checkpoints import DONE_MARKER, discover_all_checkpoints
+from posttrain_lab.utils.checkpoints import DONE_MARKER, discover_all_checkpoints, run_seed
 from posttrain_lab.utils.dotenv import REPO_ROOT, results_dir, results_dir_source
 
 # ---------------------------------------------------------------------------
@@ -67,7 +70,7 @@ class Stage:
 TRACKS: dict[str, dict] = {
     "math": {
         "driver": "run_all_math.sh",
-        "logs": ["math-all.log", "all.log", "nohup.out"],
+        "logs": ["math-all.log", "math-all-seed*.log", "all.log", "nohup.out"],
         "stages": [
             Stage("m1", "pi_SFT-math (gold CoT)", "train", "math/m1_sft_gold.yaml"),
             Stage("m2", "self-generated pairs", "pairs", "math/m2_gen_pairs.yaml", gpus="1"),
@@ -98,7 +101,7 @@ TRACKS: dict[str, dict] = {
 
 # what each analysis script writes under <results_root>
 ANALYSIS_OUTPUTS = {
-    "aggregate.py": ["frontier.csv"],
+    "aggregate.py": ["frontier.csv", "frontier_seeds.csv"],
     "frontier_plot.py": ["figures/frontier.png", "figures/frontier.pdf"],
     "frontier_math.py": ["figures/frontier_math.png", "figures/frontier_math.pdf"],
     "diagnostics.py": ["figures/dpo_logps.png", "figures/diagnostics.png"],
@@ -279,9 +282,50 @@ def launcher_plan(task: str, smoke: bool) -> dict:
     return plan
 
 
-def log_name(template: str, override: str = "", shard: int = 0) -> str:
-    """The name scripts/*/m3b_*.sh gives a sweep run's log: ${ov//[.=\\/]/_}."""
-    return template.format(ov=re.sub(r"[.=/]", "_", override), i=shard)
+@functools.lru_cache(maxsize=1)
+def base_seed() -> int:
+    """The configs' default seed (configs/base.yaml; scripts/math/seed.sh's DEFAULT_SEED)."""
+    return int(OmegaConf.load(CONFIG_DIR / "base.yaml").seed)
+
+
+def log_name(template: str, override: str = "", shard: int = 0, seed: int | None = None) -> str:
+    """The name scripts/*/m3b_*.sh gives a sweep run's log: ${ov//[.=\\/]/_},
+    plus _seed<N> for a seed other than the default (scripts/math/seed.sh)."""
+    name = template.format(ov=re.sub(r"[.=/]", "_", override), i=shard)
+    if seed is not None and int(seed) != base_seed():
+        name = re.sub(r"\.log$", f"_seed{int(seed)}.log", name)
+    return name
+
+
+def arg_seed(args: list[str]) -> int | None:
+    """seed=N among a job's overrides (the math scripts pass seed=$SEED)."""
+    for a in args:
+        if a.startswith("seed=") and a[5:].isdigit():
+            return int(a[5:])
+    return None
+
+
+SEED_TAG_RE = re.compile(r"\[seed (\d+)\]")   # run_all_math.sh stage headers: '=== math m3a: SFT arm [seed 18]'
+
+
+def track_seeds(task: str, root: Path, jobs: list[Job], job_dirs, requested: list[int] | None = None) -> list[int]:
+    """The seeds a track's report covers: --seed if given, else the default
+    seed plus every seed with a run or pairs dir under root, or a running job
+    (job_dirs: the output dirs of the running training / pair jobs)."""
+    if requested:
+        return sorted(set(requested))
+    seeds = {base_seed()}
+    for sub in ("runs", "data"):
+        if (root / sub).is_dir():
+            seeds |= {s for d in (root / sub).iterdir() if d.is_dir() and (s := run_seed(d)) is not None}
+    for out in job_dirs:
+        if Path(out).parent.parent == root and run_seed(out) is not None:
+            seeds.add(run_seed(out))
+    for job in jobs:
+        job_task = next((a.split("=", 1)[1] for a in job.args if a.startswith("task=")), "helpful")
+        if job.module == "eval.run_eval" and job_task == task and arg_seed(job.args) is not None:
+            seeds.add(arg_seed(job.args))
+    return sorted(seeds)
 
 
 # ---------------------------------------------------------------------------
@@ -615,6 +659,7 @@ class Run:
     name: str
     override: str | None
     output_dir: str
+    seed: int | None = None
     state: str = "pending"            # done | running | stopped | failed | pending
     checkpoints: int = 0
     expected_checkpoints: int | None = None
@@ -764,7 +809,7 @@ def stop_probe_state(run: Run, out: Path, stage_yaml: str, smoke: bool) -> None:
 def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, Job],
                 driver_section: list[str] | None, driver_log: Path | None) -> Run:
     out = Path(str(cfg.output_dir))
-    run = Run(name=out.name, override=override, output_dir=str(out))
+    run = Run(name=out.name, override=override, output_dir=str(out), seed=int(cfg.seed))
     trainer = str(cfg.get("stage", "sft"))
     run.expected_checkpoints = expected_checkpoints(cfg) if stage.kind in ("train", "rm") else None
     job = jobs_by_dir.get(str(out))
@@ -799,7 +844,7 @@ def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, 
     # the log this run writes to: its own (sweep runs), the job's stdout, or the driver's section
     log_path = None
     if stage.log and override is not None:
-        candidate = REPO_ROOT / log_name(stage.log, override)
+        candidate = REPO_ROOT / log_name(stage.log, override, seed=run.seed)
         if candidate.exists():
             log_path = candidate
     if job is not None and job.log:
@@ -925,16 +970,17 @@ def unfinished_share(path: Path, limit: int = 400) -> float | None:
     return unfinished / seen if seen else None
 
 
-def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
+def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage, seeds: list[int] | None = None) -> dict:
     root = Path(str(eval_cfg.results_root))
     out_dir = Path(str(eval_cfg.eval.out_dir))
     groups = [g for g in eval_cfg.eval.metric_groups if g in SENTINELS]
     num_prompts = eval_cfg.eval.get("num_prompts")
     num_prompts = int(num_prompts) if num_prompts is not None else None
     spp = eval_cfg.eval.get("samples_per_prompt")
-    ckpts = discover_all_checkpoints(root / "runs") if (root / "runs").exists() else []
+    ckpts = discover_all_checkpoints(root / "runs", seeds) if (root / "runs").exists() else []
     per_group = {g: 0 for g in groups}
     per_run: dict[str, list[int]] = {}
+    per_seed: dict[int, list[int]] = {s: [0, 0] for s in seeds or []}
     latest_samples: dict[str, Path] = {}
     complete = 0
     for ck in ckpts:
@@ -949,6 +995,9 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
         tally = per_run.setdefault(run_dir.name, [0, 0])
         tally[0] += ok
         tally[1] += 1
+        seed_tally = per_seed.setdefault(run_seed(run_dir), [0, 0])
+        seed_tally[0] += ok
+        seed_tally[1] += 1
         if (out_dir / run_dir.name / f"{ck.name}.samples.jsonl").exists():
             latest_samples[run_dir.name] = out_dir / run_dir.name / f"{ck.name}.samples.jsonl"
     unfinished = {name: unfinished_share(path) for name, path in latest_samples.items()}
@@ -960,8 +1009,12 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
         job_task = next((a.split("=", 1)[1] for a in job.args if a.startswith("task=")), "helpful")
         if job_task != task:
             continue
+        job_seed = arg_seed(job.args)
+        if seeds and (base_seed() if job_seed is None else job_seed) not in seeds:
+            continue  # another seed's eval (run_eval evaluates only its config seed's runs)
         shard = job.shard or "0/1"
-        log = Path(job.log) if job.log else REPO_ROOT / log_name(stage.log or "", shard=int(shard.split("/")[0]))
+        log = Path(job.log) if job.log else REPO_ROOT / log_name(stage.log or "", shard=int(shard.split("/")[0]),
+                                                                 seed=arg_seed(job.args))
         lines = log_lines(tail_text(log)) if log.exists() else []
         current = None
         for line in reversed(lines):
@@ -974,14 +1027,14 @@ def eval_state(task: str, eval_cfg, jobs: list[Job], stage: Stage) -> dict:
     # shard logs of a finished/failed eval
     stopped = []
     if stage.log and not shards:
-        for i in range(8):
-            log = REPO_ROOT / log_name(stage.log, shard=i)
+        for i, seed in ((i, s) for s in (seeds or [None]) for i in range(8)):
+            log = REPO_ROOT / log_name(stage.log, shard=i, seed=seed)
             if log.exists():
                 errs = summarize_errors(log_lines(tail_text(log)))
                 if errs:
                     stopped.append({"log": str(log), "errors": errs})
     return {"checkpoints": len(ckpts), "complete": complete, "groups": groups, "per_group": per_group,
-            "unfinished": unfinished,
+            "unfinished": unfinished, "per_seed": {str(k): v for k, v in per_seed.items()},
             "per_run": per_run, "shards": shards, "failed_shards": stopped}
 
 
@@ -1008,24 +1061,31 @@ def figures_state(eval_cfg, analysis: list[str]) -> dict:
 
 
 def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict[str, Job],
-                log_override: str | None) -> dict:
+                log_override: str | None, seeds: list[int] | None = None) -> dict:
     spec = TRACKS[task]
     smoke = os.environ.get("SMOKE") == "1"
     plan = launcher_plan(task, smoke)
     eval_cfg = load_config("eval.yaml", [f"task={task}"])
     root = Path(str(eval_cfg.results_root))
+    seeds = track_seeds(task, root, jobs, jobs_by_dir, seeds)
 
     scripts = ("run_smoke.sh",) if smoke else (spec["driver"], "run_all.sh")
     drivers = [d for d in find_drivers(procs) if d["script"] in scripts]
     driver = drivers[0] if drivers else None
     names = ["smoke.log", "nohup.out"] if smoke else spec["logs"]
     driver_log, header, section_lines, driver_errors = None, None, None, None
-    for candidate in [log_override, driver and driver.get("log")] + [str(REPO_ROOT / n) for n in names]:
+    # the named logs newest first: a second seed's math-all-seed18.log after seed 17's math-all.log
+    named = {p for n in names for p in REPO_ROOT.glob(n) if p.is_file()}
+    named = sorted(named, key=lambda p: p.stat().st_mtime, reverse=True)
+    for candidate in [log_override, driver and driver.get("log")] + [str(p) for p in named]:
         if not candidate or not Path(candidate).exists():
             continue
         head, section = last_section(tail_text(Path(candidate)), plan["prefix"])
         if head is None:
             continue  # no header of this track: another track's log
+        tag = SEED_TAG_RE.search(head)
+        if tag and int(tag[1]) not in seeds and candidate != log_override:
+            continue  # another seed's run (math-all-seed18.log under --seed 17)
         driver_log, header = Path(candidate), head
         section_lines = log_lines(section)
         driver_errors = summarize_errors(section_lines)
@@ -1045,9 +1105,11 @@ def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict
                 values = [f"{k}={v}" for k, vs in sweeps.items() for v in vs]
             else:
                 values = [None]
-            for ov in values:
-                cfg = load_config(stage.yaml, ov.split() if ov else [])
-                section = section_lines if header_names(header, stage, plan, smoke) else None
+            header_seed = SEED_TAG_RE.search(header or "")
+            for seed, ov in ((seed, ov) for seed in seeds for ov in values):
+                cfg = load_config(stage.yaml, (ov.split() if ov else []) + [f"seed={seed}"])
+                ours = header_names(header, stage, plan, smoke) and (header_seed is None or int(header_seed[1]) == seed)
+                section = section_lines if ours else None
                 run = resolve_run(stage, cfg, ov, jobs_by_dir, section, driver_log)
                 if stage.kind == "pairs":
                     entry["pairs"] = pairs_checks(run, cfg, eval_cfg)
@@ -1057,7 +1119,7 @@ def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict
             states = [r.state for r in entry["runs"]]
             entry["state"] = _rollup(states)
         elif stage.kind == "eval":
-            ev = eval_state(task, eval_cfg, jobs, stage)
+            ev = eval_state(task, eval_cfg, jobs, stage, seeds)
             entry["eval"] = ev
             if ev["shards"]:
                 entry["state"] = "running"
@@ -1082,7 +1144,7 @@ def track_state(task: str, procs: list[dict], jobs: list[Job], jobs_by_dir: dict
 
     current = next((s for s in stages if s["state"] == "running"), None)
     return {
-        "task": task, "results_root": str(root), "exists": root.exists(),
+        "task": task, "results_root": str(root), "exists": root.exists(), "seeds": seeds,
         "driver": driver, "driver_log": str(driver_log) if driver_log else None,
         "log_stage": header, "driver_errors": driver_errors, "stages": stages,
         "current": current["key"] if current else None,
@@ -1113,7 +1175,7 @@ def _rollup(states: list[str]) -> str:
 # the whole picture + attention list
 
 
-def collect(tasks: list[str], log_override: str | None = None) -> dict:
+def collect(tasks: list[str], log_override: str | None = None, seeds: list[int] | None = None) -> dict:
     procs = list_processes()
     jobs = find_jobs(procs)
     jobs_by_dir = {}
@@ -1122,7 +1184,7 @@ def collect(tasks: list[str], log_override: str | None = None) -> dict:
         if out:
             jobs_by_dir[out] = job
     # --log goes to every track; each reads only its own '=== ' headers from it
-    tracks = [track_state(t, procs, jobs, jobs_by_dir, log_override) for t in tasks]
+    tracks = [track_state(t, procs, jobs, jobs_by_dir, log_override, seeds) for t in tasks]
     res = results_dir()
     try:
         usage = shutil.disk_usage(res if Path(res).exists() else REPO_ROOT)
@@ -1301,9 +1363,11 @@ def render(report: dict, color: bool) -> str:
         if track["driver_log"]:
             stage_hdr = f"  ·  last stage header: {track['log_stage']}" if track["log_stage"] else ""
             L.append(f"  log  {track['driver_log']}{stage_hdr}")
+        if len(track.get("seeds") or []) > 1:
+            L.append(f"  seeds {', '.join(map(str, track['seeds']))}")
         if not drv and any(s["state"] != "done" for s in track["stages"]):
             log = Path(track["driver_log"]).name if track["driver_log"] else f"{track['task']}-all.log"
-            L.append(p(f"  resume   nohup make {track['task']}-all >> {log} 2>&1 &   (finished runs are skipped)", "2"))
+            L.append(p(f"  resume   nohup {resume_target(track)} >> {log} 2>&1 &   (finished runs are skipped)", "2"))
         done = sum(s["state"] == "done" for s in track["stages"])
         L.append(f"  stages done {done}/{len(track['stages'])}"
                  + (f"  ·  now: {track['current']}" if track["current"] else ""))
@@ -1313,7 +1377,7 @@ def render(report: dict, color: bool) -> str:
                         "1": "1 GPU", "0": "CPU"}.get(stage["gpus"], "")
             L.append(head + p(f"   [{gpu_note}]", "2"))
             for run in stage["runs"]:
-                L.extend(render_run(run, p, "        ", label=run.override or run.name))
+                L.extend(render_run(run, p, "        ", label=run_label(run, track)))
             if stage.get("eval"):
                 L.extend(render_eval(stage["eval"], p))
             if stage.get("figures"):
@@ -1374,6 +1438,32 @@ def render(report: dict, color: bool) -> str:
     return "\n".join(L)
 
 
+def run_label(run: Run, track: dict) -> str:
+    """A run's line label: its sweep value, plus the seed when the track has several."""
+    if not run.override:
+        return run.name
+    return run.override + (f" [seed {run.seed}]" if len(track.get("seeds") or []) > 1 else "")
+
+
+def resume_target(track: dict) -> str:
+    """The make command that finishes a track: math needs each unfinished seed's own run."""
+    if track["task"] != "math":
+        return f"make {track['task']}-all"
+    seeds = {r.seed for s in track["stages"] for r in s["runs"] if r.state != "done" and r.seed is not None}
+    for stage in track["stages"]:
+        for seed, (complete, total) in ((stage.get("eval") or {}).get("per_seed") or {}).items():
+            if complete < total:
+                seeds.add(int(seed))
+    if not seeds:  # every run and checkpoint is done: only the figures are left
+        return "make math-plots"
+    seeds = sorted(seeds)
+    if seeds == [base_seed()]:
+        return "make math-all"
+    if len(seeds) == 1:
+        return f"make math-all SEED={seeds[0]}"
+    return f'make math-seeds SEEDS="{" ".join(map(str, seeds))}"'
+
+
 def render_eval(ev: dict, p: Painter) -> list[str]:
     out = []
     if not ev["checkpoints"]:
@@ -1381,6 +1471,8 @@ def render_eval(ev: dict, p: Painter) -> list[str]:
         return out
     out.append(f"        {ev['complete']}/{ev['checkpoints']} checkpoints fully evaluated")
     out.append("        groups: " + "  ".join(f"{g} {n}/{ev['checkpoints']}" for g, n in ev["per_group"].items()))
+    if len(ev.get("per_seed") or {}) > 1:
+        out.append("        per seed: " + "  ".join(f"seed {s} {a}/{b}" for s, (a, b) in ev["per_seed"].items()))
     runs = "  ".join(f"{name} {a}/{b}" for name, (a, b) in ev["per_run"].items())
     out.append(f"        per run: {runs}")
     shares = {k: v for k, v in ev.get("unfinished", {}).items() if v is not None}
@@ -1409,7 +1501,7 @@ def _gpu_owners(report: dict) -> dict[int, str]:
             for run in stage["runs"]:
                 if run.state != "running":
                     continue
-                label = f"{track['task']} {stage['key']} {run.override or run.name}"
+                label = f"{track['task']} {stage['key']} {run_label(run, track)}"
                 ids = _gpu_ids(run.gpus, gpus)
                 for i in ids:
                     owners.setdefault(i, []).append(label)
@@ -1449,6 +1541,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
     parser.add_argument("--watch", type=float, metavar="SEC", help="refresh every SEC seconds")
     parser.add_argument("--log", help="the run_all log, if it is not math-all.log / helpful-all.log / all.log")
+    parser.add_argument("--seed", type=int, action="append", metavar="N",
+                        help="only this training seed (repeatable); default: every seed present")
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
     if args.smoke:
@@ -1457,7 +1551,7 @@ def main(argv: list[str] | None = None) -> None:
     color = not args.no_color and not args.json and sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
     while True:
-        report = collect(tasks, args.log)
+        report = collect(tasks, args.log, args.seed)
         text = to_json(report) if args.json else render(report, color)
         if args.watch:
             sys.stdout.write("\033[2J\033[H")

@@ -343,7 +343,7 @@ def _touch(path: Path, mtime: float, text: str = "x") -> None:
 
 MATH_ROW = {"kl_k3": 0.1, "pass1": 0.3, "ppl_wikitext": 9.0, "harness": {}, "distinct_2": 0.5, "self_bleu": 0.2,
             "logp_chosen": -50.0}
-MATH_OUTPUTS = ["figures/frontier_math.png", "figures/frontier_math.pdf", "figures/diversity.png",
+MATH_OUTPUTS = ["frontier_seeds.csv", "figures/frontier_math.png", "figures/frontier_math.pdf", "figures/diversity.png",
                 "figures/retention.png", "figures/pref_logps.png", "figures/dpo_logps.png", "figures/diagnostics.png"]
 
 
