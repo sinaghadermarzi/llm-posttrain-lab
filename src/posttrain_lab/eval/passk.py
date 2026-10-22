@@ -6,11 +6,25 @@ success rate at the eval temperature). pass@k = fraction of prompts with at
 least one correct among their k samples. Their gap is the diversity dividend:
 imitation-style training tends to collapse it (pass@k falls toward pass@1)
 while KL-constrained RL preserves it.
+
+Standard errors are over prompts (the unit that varies: the 8 samples of one
+prompt are correlated): pass1_se = sd of the per-prompt solve rates / sqrt(n).
+Checkpoints are scored on the same prompts, so a difference between two of
+them is better judged paired (analysis/compare_math.py) than from these.
 """
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
+
+
+def _se(values: list[float]) -> float:
+    n = len(values)
+    if n < 2:
+        return float("nan")
+    mean = sum(values) / n
+    return math.sqrt(sum((v - mean) ** 2 for v in values) / (n - 1) / n)
 
 
 def passk_metrics(samples: list[dict], k: int) -> dict:
@@ -26,4 +40,6 @@ def passk_metrics(samples: list[dict], k: int) -> dict:
         "pass1": pass1,
         f"pass{k}": passk,
         "pass_gap": passk - pass1,
+        "pass1_se": _se([sum(v) / len(v) for v in by_prompt.values()]),
+        f"pass{k}_se": _se([float(any(v)) for v in by_prompt.values()]),
     }
