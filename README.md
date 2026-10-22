@@ -41,12 +41,14 @@ self-generated pairs and reuse the PPO wrapper unchanged.)
 helpful:  base → SFT(train_sft) → π_SFT → RM (acc-gated) → arms:
             SFT(chosen) | DPO β∈{.01,.05,.1,.3} | PPO c∈{.02,.05,.1} | GRPO β∈{0,.01,.04,.1}
 math:     base → SFT(gold CoT) → π_SFT-math → self-gen pairs → arms:
-            SFT(gold) | DPO β∈{.01,.05,.1,.3} | GRPO(verifier) β∈{0,.01,.04,.1}
+            SFT(gold) | DPO β∈{.01,.05,.1,.3} | DPO+NLL β∈{.01,.05,.1,.3} | GRPO(verifier) β∈{0,.01,.04,.1}
 ```
 
 Each task's π_SFT is both the shared starting point of its arms and the KL
 reference for its eval; the β=0 GRPO runs trace what *unconstrained* reward
-optimization does.
+optimization does. Math's DPO+NLL arm is the DPO arm plus the NLL of the
+chosen answer (IRPO / RPO; TRL `loss_type: [sigmoid, sft]`), at the same
+budget and β grid, so the two show what that term changes.
 
 ## Evaluation — every checkpoint becomes one frontier point
 
@@ -56,7 +58,7 @@ Per checkpoint: sample N responses per held-out prompt at temperature 1.0
 
 | Group | Evidence | Key outputs |
 |---|---|---|
-| `core` / `core_math` | the frontier | k3/k1 sequence-KL vs π_SFT; dual reward scores (helpful) or pass@1/pass@8 (math) |
+| `core` / `core_math` | the frontier | k3/k1 sequence-KL vs π_SFT (figures plot k1: k3 explodes far from π_SFT); dual reward scores (helpful) or pass@1/pass@8 (math) |
 | `retention_ppl` | capability retention | wikitext-2 perplexity |
 | `retention_harness` | capability retention | lm-eval HellaSwag/ARC accuracy (all checkpoints by default — `eval.harness.which: final` to economize) |
 | `diversity` | mode collapse | distinct-1/2/3, self-BLEU across the N samples (reused, not regenerated) |
@@ -114,7 +116,7 @@ after a crash and it continues. Per-stage targets:
 |---|---|---|
 | `make sft-base` | `make math-sft-base` | π_SFT (2–3 h / ~30 min) |
 | `make rm` | `make math-pairs` | RM (2–3 h) / self-gen pairs (~1 h) |
-| `make arm-sft arm-dpo` | `make math-arm-sft math-arm-dpo` | imitation + DPO sweep |
+| `make arm-sft arm-dpo` | `make math-arm-sft math-arm-dpo math-arm-dpo-nll` | imitation + DPO (+NLL) sweeps |
 | `make arm-ppo arm-grpo` | `make math-arm-grpo` | RL sweeps (the long pole) |
 | `make eval` | `make math-eval` | sharded, incremental |
 | `make plots` | `make math-plots` | figures |
@@ -188,7 +190,7 @@ keep everything upstream and reset just that stage:
 make reset TASK=math RESET_ARGS="--stage m3b --archive --relaunch"
 ```
 
-`--stage` takes an arm (math `m3a`/`m3b`/`m3d`, helpful `3a`–`3d`). It removes
+`--stage` takes an arm (math `m3a`–`m3d`, helpful `3a`–`3d`). It removes
 only that arm's run dirs, their eval results and their per-run logs. That
 includes old runs of the arm the config no longer names, such as a previous
 sweep grid or seed. It stops only that arm's own jobs, and refuses while
@@ -323,6 +325,17 @@ tests/                    python -m pytest tests/ (CPU; the download test skips 
   after π_SFT unless `python -m posttrain_lab.utils.chat RUN_DIR --probe
   STAGE_YAML` measures P(`<|im_end|>`) ≥ 0.8 where the training answers end
   (written to `RUN_DIR/stop_probe.json`; `make status` shows it).
+- **DPO budget and likelihood displacement** (math): DPO on the self-generated
+  pairs either barely moves or collapses.
+  - At lr 5e-7 × 1 epoch: KL 0.16, loss stuck near ln 2.
+  - At 5e-6 × 2 epochs: pass@1 peaked at 0.57 by step 58, then fell to
+    0.07–0.37 while training accuracy reached 0.99. The held-out
+    log-probability of the *correct* answers fell along with the wrong ones'.
+  - The answer format stays intact (`#### N`); the reasoning comes apart.
+  - The DPO arm now runs at 2e-6 × 2 epochs with 10 checkpoints per run, and
+    the DPO+NLL arm adds the term meant to prevent this.
+  - `kl_k3` is unusable that far out (up to 1e23), so the figures plot `kl_k1`
+    on a symlog axis.
 - **TRL API drift**: PPOTrainer lives in `trl.experimental.ppo` (defensive
   import); pins in `requirements.txt` are load-bearing — bump trl+vllm as a
   pair and re-run `make smoke`.

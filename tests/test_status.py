@@ -88,12 +88,15 @@ def test_launcher_plans_follow_the_scripts() -> None:
     smoke = status.launcher_plan("math", True)
     assert [(yaml, ovs) for _, yaml, ovs in smoke["steps"]] == [
         ("math/m1_sft_gold.yaml", []), ("math/m2_gen_pairs.yaml", []),
-        ("math/m3_arm_dpo.yaml", ["train.beta=0.1"]), ("math/m3_arm_grpo.yaml", ["train.beta=0.04"])]
+        ("math/m3_arm_dpo.yaml", ["train.beta=0.1"]), ("math/m3_arm_dpo_nll.yaml", ["train.beta=0.1"]),
+        ("math/m3_arm_grpo.yaml", ["train.beta=0.04"])]
     helpful = status.launcher_plan("helpful", True)
     assert [ovs for _, _, ovs in helpful["steps"]] == [[], [], [], ["train.beta=0.1"], ["train.kl_coef=0.05"],
                                                         ["train.beta=0.04"]]
     assert status.launcher_plan("math", False)["analysis"] == [
-        "aggregate.py", "frontier_math.py", "diversity_plot.py", "retention_plot.py", "pref_logps_plot.py"]
+        "aggregate.py", "frontier_math.py", "diversity_plot.py", "retention_plot.py", "pref_logps_plot.py",
+        "diagnostics.py"]
+    assert set(status.launcher_plan("math", True)["analysis"]) == set(status.launcher_plan("math", False)["analysis"])
     assert "diagnostics.py" in status.launcher_plan("helpful", False)["analysis"]
     assert set(status.launcher_plan("helpful", True)["analysis"]) == set(status.launcher_plan("helpful", False)["analysis"])
 
@@ -224,7 +227,7 @@ def test_report_on_a_stopped_math_run(repo, tmp_path: Path) -> None:
     (track,) = report["tracks"]
     stages = {s["key"]: s for s in track["stages"]}
     states = {k: s["state"] for k, s in stages.items()}
-    assert states == {"m1": "done", "m2": "done", "m3a": "failed", "m3b": "failed",
+    assert states == {"m1": "done", "m2": "done", "m3a": "failed", "m3b": "failed", "m3c": "pending",
                       "m3d": "pending", "m4": "stopped", "m5": "pending"}
 
     (base,) = stages["m1"]["runs"]
@@ -341,7 +344,7 @@ def _touch(path: Path, mtime: float, text: str = "x") -> None:
 MATH_ROW = {"kl_k3": 0.1, "pass1": 0.3, "ppl_wikitext": 9.0, "harness": {}, "distinct_2": 0.5, "self_bleu": 0.2,
             "logp_chosen": -50.0}
 MATH_OUTPUTS = ["figures/frontier_math.png", "figures/frontier_math.pdf", "figures/diversity.png",
-                "figures/retention.png", "figures/pref_logps.png"]
+                "figures/retention.png", "figures/pref_logps.png", "figures/dpo_logps.png", "figures/diagnostics.png"]
 
 
 def test_finished_smoke_run_reads_done(repo, tmp_path: Path) -> None:
@@ -351,7 +354,7 @@ def test_finished_smoke_run_reads_done(repo, tmp_path: Path) -> None:
 
     math = tmp_path / "results" / "smoke" / "math"
     t0 = time.time() - 100
-    for run in ("sft-base_seed17", "dpo_beta0.1_seed17", "grpo_beta0.04_seed17"):
+    for run in ("sft-base_seed17", "dpo_beta0.1_seed17", "dpo-nll_beta0.1_seed17", "grpo_beta0.04_seed17"):
         for step in (5, 10):
             _ckpt(math / "runs" / run, step, 10, loss=0.5)
             _touch(math / "eval" / run / f"checkpoint-{step}.jsonl", t0, json.dumps(MATH_ROW) + "\n")
@@ -370,9 +373,9 @@ def test_finished_smoke_run_reads_done(repo, tmp_path: Path) -> None:
     assert run.returncode == 0, run.stderr[-3000:]
     report = json.loads(run.stdout)
     stages = report["tracks"][0]["stages"]
-    assert [s["key"] for s in stages] == ["m1", "m2", "m3b", "m3d", "m4", "m5"]  # no m3a in smoke
+    assert [s["key"] for s in stages] == ["m1", "m2", "m3b", "m3c", "m3d", "m4", "m5"]  # no m3a in smoke
     assert {s["key"]: [r["override"] for r in s["runs"]] for s in stages if s["runs"]} == {
-        "m1": [None], "m2": [None], "m3b": ["train.beta=0.1"], "m3d": ["train.beta=0.04"]}
+        "m1": [None], "m2": [None], "m3b": ["train.beta=0.1"], "m3c": ["train.beta=0.1"], "m3d": ["train.beta=0.04"]}
     assert all(s["state"] == "done" for s in stages), [(s["key"], s["state"]) for s in stages]
     assert report["attention"] == []
 
