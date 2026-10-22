@@ -36,7 +36,7 @@ from posttrain_lab.config import load_config
 from posttrain_lab.data import eval_prompts
 from posttrain_lab.eval import diversity, pref_logps, retention
 from posttrain_lab.eval.generate import sample_responses
-from posttrain_lab.eval.groups import SENTINELS, missing_groups, stale_groups
+from posttrain_lab.eval.groups import SENTINELS, group_keys, missing_groups, stale_groups
 from posttrain_lab.eval.kl import compute_kl
 from posttrain_lab.eval.passk import passk_metrics
 from posttrain_lab.eval.reward_score import score_samples
@@ -155,6 +155,17 @@ def _sync_tracking(cfg, run_dir: Path, summary_path: Path, row: dict) -> None:
         os.replace(tmp, marker)
 
 
+def _forget_logged(summary_path: Path, keys: set[str]) -> None:
+    """Drop keys from the MLflow sidecar so _sync_tracking logs them again."""
+    marker = summary_path.with_suffix(".mlflow.json")
+    if not marker.exists() or not keys:
+        return
+    logged = set(json.loads(marker.read_text())) - keys
+    tmp = marker.with_suffix(".tmp")
+    tmp.write_text(json.dumps(sorted(logged)))
+    os.replace(tmp, marker)
+
+
 def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
     run_dir = ckpt.parent if ckpt.name.startswith("checkpoint-") else ckpt
     out_dir = Path(cfg.eval.out_dir) / run_dir.name
@@ -172,16 +183,17 @@ def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
     spp = int(cfg.eval.samples_per_prompt)
     stale = stale_groups(row, requested, len(prompts), spp)
     if stale:
-        # evaluated on another prompt set: forget those groups first, so a crash
-        # between regenerating the samples and recomputing diversity can't leave
-        # the row claiming old diversity numbers for the new samples
+        # evaluated on another prompt set: forget everything those groups wrote
+        # first (row and MLflow marker), so neither a crash mid-way nor
+        # aggregate.py reading the row in between can mix old-prompt and
+        # new-prompt numbers, and the recomputed values are sent to MLflow again
         print(f"[eval] {summary_path}: {stale} were computed on {row.get('eval_prompts') or 'another number of'} "
               f"prompts, now {len(prompts)}: recomputing")
-        for group in stale:
-            for key in GROUPS[group][0]:
-                row.pop(key, None)
-        row.pop("eval_prompts", None)
+        dropped = {k for group in stale for k in group_keys(row, group)}
+        for key in dropped:
+            row.pop(key, None)
         _atomic_write_row(summary_path, row)
+        _forget_logged(summary_path, dropped)
     missing = missing_groups(row, requested, len(prompts), spp)
     if not missing:
         print(f"[eval] {summary_path} complete for {requested}, skipping")

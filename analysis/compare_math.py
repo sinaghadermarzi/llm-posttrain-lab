@@ -115,13 +115,16 @@ def resolve_seeds(eval_root: Path, spec: str) -> dict[int, Path]:
 
 
 def per_prompt(path: Path) -> dict[str, float]:
+    """Solve rate per question, keyed by the question text: prompt ids are
+    positions (gsm8k-<i>) and point at different questions in a 512-prompt
+    subsample and the full test split, so they must not be used to pair."""
     by_prompt: dict[str, list[bool]] = defaultdict(list)
     with path.open() as f:
         for line in f:
             if line.strip():
                 s = json.loads(line)
-                by_prompt[s["prompt_id"]].append(bool(s["correct"]))
-    return {pid: sum(v) / len(v) for pid, v in by_prompt.items()}
+                by_prompt[s.get("prompt") or s["prompt_id"]].append(bool(s["correct"]))
+    return {q: sum(v) / len(v) for q, v in by_prompt.items()}
 
 
 def mean_se(values: list[float]) -> tuple[float, float]:
@@ -164,8 +167,9 @@ def compare_one(specs: list[str], paths: list[Path]) -> None:
     print(f"\npaired vs {base_spec} (same prompts; 95% CI = ± 1.96 SE)")
     for spec, sc in zip(specs[1:], scores[1:]):
         shared = set(base) & set(sc)
-        if len(shared) < min(len(base), len(sc)):
-            print(f"  note: {spec} shares only {len(shared)} prompts with {base_spec} (evaluated on other prompt sets?)")
+        if len(shared) < max(len(base), len(sc)):
+            print(f"  note: {spec} ({len(sc)} prompts) and {base_spec} ({len(base)}) share {len(shared)} questions: "
+                  "different eval prompt sets (re-run make math-eval to put every checkpoint on the same one)")
         res = paired(base, sc)
         if res is None:
             print(f"  {spec}: too few shared prompts")
