@@ -13,7 +13,11 @@ data:
 
 eval:
   prompts_split: test
-  num_prompts: 512
+  # the whole GSM8K test split: 512 prompts left pass@1 SE ~0.015-0.02, the
+  # size of the DPO-vs-GRPO gaps being measured. Rows evaluated on another
+  # count are re-sampled (eval/groups.py:stale_groups); retention and pref_logps
+  # don't depend on the prompts and are kept.
+  num_prompts: 1319
   samples_per_prompt: 8          # = pass_k: the same N samples give pass@1..pass@8
   pass_k: 8
   metric_groups: [core_math, retention_ppl, retention_harness, diversity, pref_logps]

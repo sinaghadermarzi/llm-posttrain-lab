@@ -58,7 +58,7 @@ Per checkpoint: sample N responses per held-out prompt at temperature 1.0
 
 | Group | Evidence | Key outputs |
 |---|---|---|
-| `core` / `core_math` | the frontier | k3/k1 sequence-KL vs π_SFT (figures plot k1: k3 explodes far from π_SFT); dual reward scores (helpful) or pass@1/pass@8 (math) |
+| `core` / `core_math` | the frontier | k3/k1 sequence-KL vs π_SFT (figures plot k1: k3 explodes far from π_SFT); dual reward scores (helpful) or pass@1/pass@8 ± SE over prompts (math; all 1319 GSM8K test prompts) |
 | `retention_ppl` | capability retention | wikitext-2 perplexity |
 | `retention_harness` | capability retention | lm-eval HellaSwag/ARC accuracy (all checkpoints by default — `eval.harness.which: final` to economize) |
 | `diversity` | mode collapse | distinct-1/2/3, self-BLEU across the N samples (reused, not regenerated) |
@@ -68,7 +68,19 @@ Per checkpoint: sample N responses per held-out prompt at temperature 1.0
 runs only if its keys are missing (atomic read-merge-replace). Adding a group
 to the config later and re-running `make eval` computes only the new metrics —
 nothing is regenerated. (Corollary: don't tail the summary files; they are
-rewritten, not appended.)
+rewritten, not appended.) Each row also records how many prompts it was
+sampled on, so changing `eval.num_prompts` re-samples just the prompt-dependent
+groups (`core`/`core_math`, `diversity`) on the next `make eval` /
+`make math-eval`. Retention and `pref_logps` are kept.
+
+**Comparing two math checkpoints.** All checkpoints are scored on the same
+prompts, so judge a difference paired, per prompt. That is much tighter than
+each point's own ± SE. Pick checkpoints by matched KL or a fixed step: picking
+each run's best on these same prompts flatters it.
+
+```bash
+python analysis/compare_math.py "$RESULTS_DIR/math" dpo_beta0.3@116 grpo_beta0.01@374 grpo_beta0.0@374
+```
 
 ## Quickstart
 

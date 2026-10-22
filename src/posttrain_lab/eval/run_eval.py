@@ -33,7 +33,7 @@ from posttrain_lab.config import load_config
 from posttrain_lab.data import eval_prompts
 from posttrain_lab.eval import diversity, pref_logps, retention
 from posttrain_lab.eval.generate import sample_responses
-from posttrain_lab.eval.groups import SENTINELS
+from posttrain_lab.eval.groups import SENTINELS, missing_groups, stale_groups
 from posttrain_lab.eval.kl import compute_kl
 from posttrain_lab.eval.passk import passk_metrics
 from posttrain_lab.eval.reward_score import score_samples
@@ -59,6 +59,7 @@ def _core_helpful(cfg, ckpt, ctx) -> dict:
         "reward_train_rm": sum(rm_scores) / n,
         "reward_judge": sum(judge_scores) / n,
         "num_samples": len(samples),
+        "eval_prompts": len(ctx["prompts"]),
     }
 
 
@@ -74,6 +75,7 @@ def _core_math(cfg, ckpt, ctx) -> dict:
         **kl_stats,
         **passk_metrics(samples, int(cfg.eval.pass_k)),
         "num_samples": len(samples),
+        "eval_prompts": len(ctx["prompts"]),
     }
 
 
@@ -163,7 +165,20 @@ def evaluate_checkpoint(cfg, ckpt: Path, prompts: list[dict]) -> None:
         "step": _ckpt_step(ckpt),
     }
     requested = [g for g in cfg.eval.metric_groups if g in GROUPS]
-    missing = [g for g in requested if any(key not in row for key in GROUPS[g][0])]
+    spp = int(cfg.eval.samples_per_prompt)
+    stale = stale_groups(row, requested, len(prompts), spp)
+    if stale:
+        # evaluated on another prompt set: forget those groups first, so a crash
+        # between regenerating the samples and recomputing diversity can't leave
+        # the row claiming old diversity numbers for the new samples
+        print(f"[eval] {summary_path}: {stale} were computed on {row.get('eval_prompts') or 'another number of'} "
+              f"prompts, now {len(prompts)}: recomputing")
+        for group in stale:
+            for key in GROUPS[group][0]:
+                row.pop(key, None)
+        row.pop("eval_prompts", None)
+        _atomic_write_row(summary_path, row)
+    missing = missing_groups(row, requested, len(prompts), spp)
     if not missing:
         print(f"[eval] {summary_path} complete for {requested}, skipping")
         _sync_tracking(cfg, run_dir, summary_path, row)
