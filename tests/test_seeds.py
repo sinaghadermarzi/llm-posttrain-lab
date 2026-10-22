@@ -346,7 +346,7 @@ def _row(run: str, step: int, kl: float, pass1: float) -> dict:
             # the other figures' metrics, each a function of kl so the seed mean is easy to check
             "distinct_2": 0.9 - kl / 10, "self_bleu": 0.1 + kl / 10, "mean_token_nll": 0.5 - kl / 10,
             "mean_response_tokens": 100 + 10 * kl, "ppl_wikitext": 10 + kl, "logp_chosen": -50 - kl,
-            "logp_rejected": -60 - 2 * kl}
+            "logp_rejected": -60 - 2 * kl, "harness": {"arc_easy": 0.8 - kl / 100}}
 
 
 def _eval_tree(root: Path, seeds=(17, 18)) -> None:
@@ -481,6 +481,17 @@ def test_scatter_figures_with_one_seed_draw_every_checkpoint(tmp_path: Path, mon
     for ax in fig.axes:
         assert not ax.containers                                        # no error bars, as before
         assert sorted(x for x, _ in _scatter(ax, "dpo")) == pytest.approx([1.0, 2.0])
+
+
+@pytest.mark.parametrize("seeds", [(17,), (17, 18)])
+def test_retention_has_one_panel_per_benchmark(tmp_path: Path, monkeypatch, seeds) -> None:
+    """With several seeds the rows carry harness_<task>_se too: error bars, not panels of their own."""
+    _eval_tree(tmp_path, seeds=seeds)
+    _aggregate(tmp_path)
+    fig = _plot(tmp_path, monkeypatch, "retention_plot")
+    assert [ax.get_title() for ax in fig.axes] == ["LM erosion", "arc_easy"]
+    arc = fig.axes[1]
+    assert all(c.has_yerr for c in arc.containers) and bool(arc.containers) == (len(seeds) > 1)
 
 
 def test_scatter_figures_with_two_seeds_and_no_seed_column(tmp_path: Path, monkeypatch) -> None:
