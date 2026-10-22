@@ -15,7 +15,8 @@ from trl import DPOConfig, DPOTrainer
 
 from posttrain_lab.config import load_config, train_kwargs
 from posttrain_lab.data import pref_dataset
-from posttrain_lab.train.common import align_eos, begin_run, init_path, load_tokenizer, model_kwargs, parse_entry
+from posttrain_lab.train.common import (align_eos, begin_run, init_path, load_tokenizer, model_kwargs, parse_entry,
+                                         save_final_state)
 from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
@@ -47,6 +48,7 @@ def main() -> None:
     )
     trainer.train()
     trainer.save_model(str(cfg.output_dir))
+    save_final_state(trainer)
     tokenizer.save_pretrained(str(cfg.output_dir))
     mark_done(cfg.output_dir)
 
