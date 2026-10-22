@@ -13,13 +13,16 @@ data:
 
 train:
   beta: 0.1
-  learning_rate: 5.0e-6           # 5e-7 x 1 epoch barely moved the policy (math run 2: KL 0.16, all betas alike)
+  # math showed 5e-7 x 1 epoch barely moves and 5e-6 x 2 epochs collapses
+  # (configs/math/m3_arm_dpo.yaml); 2e-6 x 1 epoch over 20k pairs (~312 steps)
+  # is about the math DPO arm's budget
+  learning_rate: 2.0e-6
   lr_scheduler_type: cosine
   warmup_ratio: 0.1
-  num_train_epochs: 2
+  num_train_epochs: 1
   max_length: 1536
   truncation_mode: keep_end
   per_device_train_batch_size: 4
   gradient_accumulation_steps: 16  # 1 GPU per run (sweep runs in parallel) -> effective 64
   save_strategy: steps
-  save_steps: 0.2                  # 5 checkpoints per run
+  save_steps: 0.1                  # 10 checkpoints per run

@@ -123,7 +123,7 @@ def _cli() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("task", choices=["helpful", "math"])
-    parser.add_argument("stage", nargs="?", choices=["dpo", "ppo", "grpo"])
+    parser.add_argument("stage", nargs="?", choices=["dpo", "dpo_nll", "ppo", "grpo"])
     parser.add_argument("--results-root", action="store_true", help="print the task's results_root and exit")
     args = parser.parse_args()
     if args.results_root:

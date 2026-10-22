@@ -20,6 +20,9 @@ bash scripts/math/m3a_arm_sft.sh
 echo "=== math m3b: DPO sweep (parallel, 1 GPU each)"
 bash scripts/math/m3b_arm_dpo.sh
 
+echo "=== math m3c: DPO+NLL sweep (parallel, 1 GPU each)"
+bash scripts/math/m3c_arm_dpo_nll.sh
+
 echo "=== math m3d: GRPO sweep (sequential, full node, verifier reward)"
 bash scripts/math/m3d_arm_grpo.sh
 

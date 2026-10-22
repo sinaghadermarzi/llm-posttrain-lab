@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from paths import default_root
-from style import INK, METHOD_COLORS, apply_style
+from style import INK, KL_COL, METHOD_COLORS, apply_style, kl_axis, marker_for
 
 
 def main() -> None:
@@ -41,10 +41,9 @@ def main() -> None:
         sub = df[df[col].notna()]
         for arm, arm_df in sub.groupby("arm"):
             color = METHOD_COLORS.get(arm, INK)
-            marker = "*" if arm == "sft-base" else "o"
-            ax.scatter(arm_df["kl_k3"], arm_df[col], color=color, marker=marker,
+            ax.scatter(arm_df[KL_COL], arm_df[col], color=color, marker=marker_for(arm),
                        s=90 if arm == "sft-base" else 30, label=arm, alpha=0.85)
-        ax.set_xlabel("KL(policy ‖ π_SFT) [nats/seq]")
+        kl_axis(ax)
         ax.set_ylabel(ylabel)
         ax.set_title(title, fontsize=11)
     axes[0].legend(fontsize=8)
