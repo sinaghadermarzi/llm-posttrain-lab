@@ -37,14 +37,23 @@ The export writes `evidence/math/<date>_seeds17-19_full-test/`:
 | Path | Contents |
 |---|---|
 | `MANIFEST.json` | git commit, date, seeds, eval settings, package versions, host, each run's training time and steps, every file and its size |
-| `configs/` | base, eval, task and stage yamls and `sweeps.yaml`, as run |
+| `configs/` | the repo's yamls at export time, plus `configs/as_run/<run>.yaml`: the resolved config each run saved when it trained |
 | `figures/` | every figure the track's plots wrote |
 | `tables/` | `frontier.csv`, `frontier_seeds.csv`, DPO pair stats, stop probes, `training_curves.csv` (from `trainer_state.json`), and `compare_<i>.txt`, one per `snapshot.yaml` line |
 | `examples/` | `examples.md`: sample 0 of each chosen checkpoint on the same questions |
 
-The export refuses if the figures are older than the eval rows (run `make math-plots` first), or if the snapshot dir
-already exists. It rebuilds the index below from every `MANIFEST.json`. Then update `FINDINGS.md` and `LOG.md`, and
-commit the snapshot with them.
+**What the manifest can and can't vouch for:**
+- `eval.measured` is read from the eval rows themselves: prompt count and samples per prompt. `eval.configured` is
+  the config now. `eval.matches_config` flags a mismatch, such as a smoke tree, a CLI override or a later config
+  change.
+- `runs[].runtime_source` says where a training time came from: `trainer_state` means the trainer's own total,
+  saved since the evidence layer. `estimate: checkpoint mtimes` is for runs trained before that.
+- `configs/as_run/` exists only for runs trained since then. For older runs, `configs/` is the repo's yamls at
+  export time, which may differ from what ran.
+
+The export refuses if any output the track's plots make is missing, or older than its inputs. That's the same test
+`make status` uses: run `make math-plots` first. It also refuses if the snapshot dir already exists. It rebuilds the
+index below from every `MANIFEST.json`. Then update `FINDINGS.md` and `LOG.md`, and commit the snapshot with them.
 
 ## Snapshots
 
