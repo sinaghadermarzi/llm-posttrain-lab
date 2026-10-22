@@ -31,7 +31,8 @@ def main() -> None:
     results_root = Path(sys.argv[1] if len(sys.argv) > 1 else default_root())
     df, seeds = seed_view(pd.read_csv(results_root / "frontier.csv"))
 
-    harness_cols = sorted(c for c in df.columns if c.startswith("harness_"))
+    # not harness_<task>_se: seed_view's across-seed SEs, drawn as error bars on their task's panel
+    harness_cols = sorted(c for c in df.columns if c.startswith("harness_") and not c.endswith("_se"))
     panels = [("ppl_wikitext", "wikitext-2 perplexity ↓", "LM erosion")] + [
         (col, f"{col.removeprefix('harness_')} acc ↑", col.removeprefix("harness_"))
         for col in harness_cols
