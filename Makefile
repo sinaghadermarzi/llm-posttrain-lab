@@ -1,6 +1,7 @@
 .PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke \
 	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
-	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-dpo-nll math-arm-grpo math-eval math-plots math-all
+	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-dpo-nll math-arm-grpo math-eval math-plots math-all \
+	math-seeds
 
 # node readiness: GPUs, NCCL, libs, HF assets, MLflow (see notebooks/onboarding.ipynb)
 preflight:
@@ -85,6 +86,13 @@ helpful-all:
 	bash scripts/run_all_helpful.sh
 
 # ---- math track (GSM8K, verifiable reward) ----
+# SEED picks the training seed of every math stage (scripts/math/seed.sh):
+#   make math-all SEED=18      one more seed, next to seed 17's runs
+#   make math-seeds SEEDS="18 19"   several, one after the other
+# math-plots aggregates every seed present.
+SEED ?= 17
+export SEED
+SEEDS ?= 17
 
 math-sft-base:
 	bash scripts/math/m1_sft_gold.sh
@@ -117,3 +125,6 @@ math-plots:
 
 math-all:
 	bash scripts/run_all_math.sh
+
+math-seeds:
+	@for s in $(SEEDS); do $(MAKE) math-all SEED=$$s || exit $$?; done
