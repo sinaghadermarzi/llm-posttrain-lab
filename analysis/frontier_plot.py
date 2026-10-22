@@ -41,9 +41,16 @@ def plot_panel(ax, df: pd.DataFrame, ycol: str, title: str) -> None:
         if arm == "sft-base":
             ax.plot(run_df[KL_COL], run_df[ycol], marker="*", markersize=14,
                     linestyle="none", color=color, zorder=5)
+            if f"{ycol}_se" in run_df.columns and run_df[f"{ycol}_se"].notna().any():
+                ax.errorbar(run_df[KL_COL], run_df[ycol], yerr=run_df[f"{ycol}_se"], fmt="none", ecolor=color,
+                            elinewidth=0.8, alpha=0.45, capsize=0, zorder=1)
             continue
         ax.plot(run_df[KL_COL], run_df[ycol], marker=marker_for(arm), color=color, alpha=0.85,
                 linestyle=METHOD_LINESTYLES.get(arm, "-"))
+        se = f"{ycol}_se"  # math pass@k: SE over prompts (eval/passk.py); thin, behind the curve
+        if se in run_df.columns and run_df[se].notna().any():
+            ax.errorbar(run_df[KL_COL], run_df[ycol], yerr=run_df[se], fmt="none", ecolor=color,
+                        elinewidth=0.8, alpha=0.45, capsize=0, zorder=1)
         last = run_df.iloc[-1]
         text = label_for(run_df)
         if text:
