@@ -8,6 +8,12 @@ the question this figure answers is whether that is DPO-specific or shared
 by the RL arms. (Training-log-based DPO logps remain in diagnostics.py;
 this eval-time version is the cross-method comparison.)
 
+With several training seeds each (arm, hyperparam) is one curve pair through
+the seed means at each checkpoint index (aggregate.py:seed_view), drawn at
+the mean of the seeds' steps there (DPO step counts differ between seeds),
+with error bars = SE of the mean across seeds; π_SFT's lines are its seed
+mean.
+
 Usage: python analysis/pref_logps_plot.py [results_root]
 """
 
@@ -19,8 +25,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from aggregate import seed_view, seeds_caption
 from paths import default_root
-from style import METHOD_COLORS, METHOD_LABELS, apply_style
+from style import METHOD_COLORS, METHOD_LABELS, apply_style, errorbars
 
 
 def main() -> None:
@@ -30,9 +37,13 @@ def main() -> None:
     if "logp_chosen" not in df.columns:
         print("no pref_logps columns in frontier.csv — run eval with the pref_logps group first")
         return
+    df, seeds = seed_view(df)
+    xcol = "step_mean" if len(seeds) > 1 else "step"
 
     arms = [a for a in METHOD_COLORS if a != "sft-base" and (df["arm"] == a).any()]
     baseline = df[df["arm"] == "sft-base"]
+    if len(seeds) > 1:
+        baseline = baseline.sort_values(xcol)  # as one seed's rows: the lowest step first
 
     fig, axes = plt.subplots(1, len(arms), figsize=(4.3 * len(arms), 4), sharey=True)
     axes = [axes] if len(arms) == 1 else list(axes)
@@ -40,17 +51,23 @@ def main() -> None:
         color = METHOD_COLORS[arm]
         for run, run_df in df[df["arm"] == arm].groupby("run"):
             run_df = run_df.sort_values("step")
-            ax.plot(run_df["step"], run_df["logp_chosen"], color=color, alpha=0.85)
-            ax.plot(run_df["step"], run_df["logp_rejected"], color=color, alpha=0.6, linestyle="--")
+            ax.plot(run_df[xcol], run_df["logp_chosen"], color=color, alpha=0.85)
+            ax.plot(run_df[xcol], run_df["logp_rejected"], color=color, alpha=0.6, linestyle="--")
+            if len(seeds) > 1:
+                for col in ("logp_chosen", "logp_rejected"):
+                    errorbars(ax, run_df, col, color, xcol=xcol)
         if not baseline.empty:
             ax.axhline(baseline["logp_chosen"].iloc[0], color=METHOD_COLORS["sft-base"],
                        linewidth=1, linestyle=":")
             ax.axhline(baseline["logp_rejected"].iloc[0], color=METHOD_COLORS["sft-base"],
                        linewidth=1, linestyle=":", alpha=0.6)
-        ax.set_xlabel("training step")
+        ax.set_xlabel("training step" if len(seeds) <= 1 else "training step (mean over seeds)")
         ax.set_title(METHOD_LABELS.get(arm, arm), fontsize=11)
     axes[0].set_ylabel("held-out mean log-prob\n(chosen solid, rejected dashed, π_SFT dotted)")
-    fig.suptitle("Do methods move probability mass off the preferred responses?", fontsize=13)
+    title = "Do methods move probability mass off the preferred responses?"
+    if len(seeds) > 1:
+        title += f"\n{seeds_caption(seeds)}"
+    fig.suptitle(title, fontsize=13)
     fig.tight_layout()
 
     out_dir = results_root / "figures"
