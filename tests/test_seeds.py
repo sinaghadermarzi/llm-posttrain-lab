@@ -209,6 +209,53 @@ def test_status_seed_flag(repo, tmp_path: Path) -> None:
     assert len(stages["m3b"]["runs"]) == 4 and stages["m4"]["eval"]["checkpoints"] == 2
 
 
+def test_seed_flag_ignores_another_seeds_driver_log(repo, tmp_path: Path) -> None:
+    """--seed 17 must not read the newer math-all-seed18.log (its stage, errors, resume log)."""
+    env = _two_seeds(repo, tmp_path)
+    (repo.root / "math-all.log").write_text("=== math m3a: SFT arm [seed 17]\n")
+    os.utime(repo.root / "math-all.log", (time.time() - 3600,) * 2)
+    run = repo.python("-m", "posttrain_lab.status", "math", "--seed", "17", "--json", check=False, **env)
+    assert run.returncode == 0, run.stderr[-3000:]
+    (track,) = json.loads(run.stdout)["tracks"]
+    assert track["driver_log"].endswith("math-all.log") and track["log_stage"] == "=== math m3a: SFT arm [seed 17]"
+    text = repo.python("-m", "posttrain_lab.status", "math", "--seed", "17", "--no-color", check=False, **env).stdout
+    assert ">> math-all.log" in text and "seed18" not in text.split("resume", 1)[1].splitlines()[0]
+    # an untagged header (m5 runs for every seed) still counts; --log is taken as given
+    run = repo.python("-m", "posttrain_lab.status", "math", "--seed", "17", "--log",
+                      str(repo.root / "math-all-seed18.log"), "--json", check=False, **env)
+    assert json.loads(run.stdout)["tracks"][0]["driver_log"].endswith("math-all-seed18.log")
+
+
+def test_seed_flag_ignores_another_seeds_eval_shards(monkeypatch, tmp_path: Path) -> None:
+    from posttrain_lab import status
+    from posttrain_lab.config import load_config
+
+    monkeypatch.setenv("RESULTS_DIR", str(tmp_path / "results"))
+    _ckpt(tmp_path / "results" / "math" / "runs" / "sft-base_seed18", 72)
+    cfg = load_config("eval.yaml", ["task=math"])
+    stage = next(s for s in status.TRACKS["math"]["stages"] if s.key == "m4")
+    jobs = [status.Job(module="eval.run_eval", args=["task=math", "seed=17", "--shard", "0/4"]),
+            status.Job(module="eval.run_eval", args=["task=math", "--shard", "1/4"])]   # no seed=: the default, 17
+    assert status.eval_state("math", cfg, jobs, stage, seeds=[18])["shards"] == []
+    assert len(status.eval_state("math", cfg, jobs, stage, seeds=[17])["shards"]) == 2
+    jobs.append(status.Job(module="eval.run_eval", args=["task=math", "seed=18", "--shard", "0/4"]))
+    assert [sh["shard"] for sh in status.eval_state("math", cfg, jobs, stage, seeds=[18])["shards"]] == ["0/4"]
+
+
+def test_resume_only_rebuilds_figures_when_every_run_is_done() -> None:
+    from posttrain_lab import status
+
+    def track(states: dict[int, str], evals: dict[str, list[int]]) -> dict:
+        runs = [status.Run(name=f"r_seed{s}", override=None, output_dir="x", seed=s, state=st) for s, st in states.items()]
+        return {"task": "math", "stages": [{"runs": runs}, {"runs": [], "eval": {"per_seed": evals}},
+                                           {"runs": [], "figures": {}}]}
+
+    assert status.resume_target(track({18: "done"}, {"18": [5, 5]})) == "make math-plots"   # not seed 17's math-all
+    assert status.resume_target(track({18: "done"}, {"18": [4, 5]})) == "make math-all SEED=18"
+    assert status.resume_target(track({17: "stopped", 18: "done"}, {"18": [5, 5]})) == "make math-all"
+    assert status.resume_target(track({17: "pending", 18: "failed"}, {})) == 'make math-seeds SEEDS="17 18"'
+
+
 def test_one_seed_reads_as_before(repo, tmp_path: Path) -> None:
     (tmp_path / "results" / "math" / "runs").mkdir(parents=True)
     run = repo.python("-m", "posttrain_lab.status", "math", "--json", check=False, RESULTS_DIR=str(tmp_path / "results"))
