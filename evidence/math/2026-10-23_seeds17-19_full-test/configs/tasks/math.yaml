@@ -1,0 +1,26 @@
+# Task: math with verifiable rewards (RLVR) on GSM8K.
+# Reward = exact-answer correctness (tasks/gsm8k.py) — no reward model, no
+# judge; the honest scoreboard is test-set pass@1 / pass@k.
+dataset:
+  id: openai/gsm8k
+  config: main
+  format: gsm8k
+
+data:
+  # self-generated preference pairs from pi_SFT-math (stage m2), used by DPO
+  # and by the math pref_logps eval
+  pairs_path: ${results_root}/data/self_pairs_seed${seed}
+
+eval:
+  prompts_split: test
+  # the whole GSM8K test split: 512 prompts left pass@1 SE ~0.015-0.02, the
+  # size of the DPO-vs-GRPO gaps being measured. Rows evaluated on another
+  # count are re-sampled (eval/groups.py:stale_groups); retention and pref_logps
+  # don't depend on the prompts and are kept.
+  num_prompts: 1319
+  samples_per_prompt: 8          # = pass_k: the same N samples give pass@1..pass@8
+  pass_k: 8
+  metric_groups: [core_math, retention_ppl, retention_harness, diversity, pref_logps]
+  pref_logps:
+    split: test                  # held-out slice of the self-generated pairs
+    num_pairs: 256
