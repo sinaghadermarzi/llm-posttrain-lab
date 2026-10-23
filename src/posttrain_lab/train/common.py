@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from transformers import AutoTokenizer
 
 from posttrain_lab.config import seed_everything
@@ -119,8 +120,30 @@ def model_kwargs(cfg: DictConfig) -> dict:
     }
 
 
+RESOLVED_CONFIG = "posttrain_config.yaml"  # read by analysis/export_evidence.py (configs/as_run/)
+
+
+def save_resolved_config(cfg: DictConfig) -> None:
+    """The fully merged config this run trains with (base, task, stage, smoke,
+    CLI overrides), next to its checkpoints, so evidence can show what ran.
+    Every rank writes the same content; tmp + rename keeps the file whole."""
+    path = Path(cfg.output_dir) / RESOLVED_CONFIG
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    OmegaConf.save(cfg, tmp, resolve=True)
+    os.replace(tmp, path)
+
+
+def save_final_state(trainer) -> None:
+    """trainer_state.json next to the final model, with the whole log
+    (train_runtime included): the last checkpoint's copy is written before the
+    run ends, so it never has the run's totals. Main process only (HF Trainer)."""
+    if hasattr(trainer, "save_state"):
+        trainer.save_state()
+
+
 def begin_run(cfg: DictConfig) -> None:
     seed_everything(int(cfg.seed))
     setup_tracking(cfg)
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
+    save_resolved_config(cfg)
     print(f"[train] stage={cfg.stage} run={cfg.run_name} out={cfg.output_dir}")
