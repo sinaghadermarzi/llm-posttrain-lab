@@ -1,4 +1,4 @@
-.PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke \
+.PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke evidence \
 	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-dpo-nll math-arm-grpo math-eval math-plots math-all \
 	math-seeds
@@ -50,6 +50,15 @@ all:
 # .env, default results/). Recursive '=' so Python only runs when plotting.
 HELPFUL_RESULTS = $(shell python -m posttrain_lab.config --results-root helpful)
 MATH_RESULTS = $(shell python -m posttrain_lab.config --results-root math)
+
+# freeze the track's current figures and tables into evidence/<task>/<date>_<NAME>/
+# (evidence/README.md): make evidence TASK=math NAME=seeds17-19_full-test
+# EVIDENCE_ARGS="--supersedes math/<old snapshot> --note '...'" / "--dry-run"
+EVIDENCE_ARGS ?=
+evidence:
+	@if [ -z "$(NAME)" ] || [ "$(TASK)" = "all" ]; then \
+		echo "make evidence needs TASK=math|helpful and NAME=<short-name> (e.g. NAME=seeds17-19_full-test)"; exit 2; fi
+	python analysis/export_evidence.py $(TASK) $(NAME) $(EVIDENCE_ARGS)
 
 # ---- helpful track (UltraFeedback, learned reward) ----
 

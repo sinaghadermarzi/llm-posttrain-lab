@@ -1,0 +1,37 @@
+# What `make evidence TASK=math` exports besides the figures and tables
+# (analysis/export_evidence.py). Edit this in a reviewed commit BEFORE taking
+# the snapshot that uses it: the comparisons are fixed before the numbers are
+# seen, so no checkpoint is picked for looking good on the test prompts.
+
+# analysis/compare_math.py argument lines, each saved as tables/compare_<i>.txt.
+# The first checkpoint of a line is the baseline. Checkpoints are named by
+# position (ckptK) or last: DPO step counts differ between seeds (own pairs).
+# Matched KL from seed 17 on the full test set (FINDINGS.md M1, M2); a line
+# that can't run yet (a seed not trained) records why and the export goes on.
+compare:
+  # ~2.13 nats: DPO beta 0.05 and GRPO beta 0.01 within 0.006 nats (M1)
+  - --seed 17 dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2
+  # ~2.66 nats: no GRPO checkpoint between 2.26 and 3.05; bracket DPO beta 0.3 (M1)
+  - --seed 17 dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt2 grpo_beta0.01@ckpt3
+  # ~3.0-3.2 nats: GRPO vs the DPO arms' checkpoints in that band (M2)
+  - --seed 17 grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
+  # the same checkpoint positions pooled over every seed present (across-seed CI)
+  - --pool dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2
+  - --pool dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt2 grpo_beta0.01@ckpt3
+  - --pool grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
+  # best-looking points (not matched KL: GRPO sits further out; say so wherever it's used)
+  - --pool dpo_beta0.3@ckpt4 grpo_beta0.01@last grpo_beta0.0@last
+
+# Responses to the same questions from these checkpoints (sample 0 each),
+# the questions they disagree on first. For the write-up: what collapse,
+# sharpening and imitation look like.
+examples:
+  seed: 17
+  prompts: 6
+  checkpoints:
+    - sft-base@last          # pi_SFT, the reference
+    - grpo_beta0.0@last      # furthest, most accurate GRPO
+    - dpo_beta0.3@ckpt4      # DPO at its best
+    - dpo_beta0.01@last      # collapsed DPO (likelihood displacement)
+    - dpo-nll_beta0.01@last  # the same beta with the NLL term
+    - sft@last               # continued imitation
