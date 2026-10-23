@@ -1,0 +1,20 @@
+$ python analysis/compare_math.py <root> --pool dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2
+
+pooled over seeds 17, 18, 19
+
+checkpoint                            seed prompts  pass@1   ± SE   KL k1
+dpo_beta0.05@ckpt2                      17    1319   0.540  0.010    2.13
+dpo_beta0.05@ckpt2                      18    1319   0.485  0.009    8.14
+dpo_beta0.05@ckpt2                      19    1319   0.542  0.010    3.05
+dpo_beta0.05@ckpt2                    mean           0.522  0.019   (± SE across seeds)
+grpo_beta0.01@ckpt2                     17    1319   0.559  0.010    2.13
+grpo_beta0.01@ckpt2                     18    1319   0.551  0.010    2.42
+grpo_beta0.01@ckpt2                     19    1319   0.551  0.010    2.01
+grpo_beta0.01@ckpt2                   mean           0.554  0.003   (± SE across seeds)
+
+paired vs dpo_beta0.05@ckpt2, per seed (same prompts; ± 1.96 SE over prompts) and across seeds (mean of the per-seed differences; ± t2 SE across seeds)
+  grpo_beta0.01@ckpt2                seed 17   +0.019 ± 0.005  [+0.009, +0.029]  better  (1319 prompts)
+  grpo_beta0.01@ckpt2                seed 18   +0.066 ± 0.006  [+0.055, +0.078]  better  (1319 prompts)
+  grpo_beta0.01@ckpt2                seed 19   +0.009 ± 0.005  [+0.000, +0.019]  better  (1319 prompts)
+  grpo_beta0.01@ckpt2                prompts   +0.032 ± 0.003  [+0.026, +0.038]  (seed-mean per prompt; eval noise only)
+  grpo_beta0.01@ckpt2                seeds     +0.032 ± 0.018  [-0.044, +0.107]  no clear difference  (3 seeds, t2 = 4.30)

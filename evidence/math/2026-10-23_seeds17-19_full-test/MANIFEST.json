@@ -1,0 +1,531 @@
+{
+  "snapshot": "math/2026-10-23_seeds17-19_full-test",
+  "task": "math",
+  "date": "2026-10-23",
+  "note": "3 seeds, 1319 prompts",
+  "created_utc": "2026-10-23T18:28:03+00:00",
+  "git": {
+    "commit": "3f812b9",
+    "subject": "Merge commit '79d5106da3f8d9d8f3ee2a9b881ee88234c042e7'",
+    "dirty": false
+  },
+  "results_root": "/home/jovyan/shared-data/sina_storage/llm_posttrain/llm-posttrain-results/math",
+  "host": "aaa-sina-vscode-gpu-0",
+  "seeds": [
+    17,
+    18,
+    19
+  ],
+  "eval": {
+    "measured": {
+      "num_prompts": [
+        1319
+      ],
+      "samples_per_prompt": [
+        8
+      ],
+      "rows": 336
+    },
+    "configured": {
+      "num_prompts": 1319,
+      "samples_per_prompt": 8,
+      "pass_k": 8,
+      "metric_groups": [
+        "core_math",
+        "retention_ppl",
+        "retention_harness",
+        "diversity",
+        "pref_logps"
+      ],
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "max_new_tokens": 512,
+      "kl_estimator": "k3",
+      "harness": {
+        "tasks": [
+          "hellaswag",
+          "arc_easy",
+          "arc_challenge"
+        ],
+        "limit": null,
+        "which": "all"
+      }
+    },
+    "matches_config": true
+  },
+  "packages": {
+    "torch": "2.11.0",
+    "transformers": "5.13.0",
+    "trl": "1.7.0",
+    "vllm": "0.23.0",
+    "datasets": "5.0.0",
+    "accelerate": "1.14.0",
+    "lm-eval": "0.4.12",
+    "omegaconf": "2.3.1",
+    "deepspeed": "0.19.7",
+    "flash-attn": null,
+    "pandas": "2.2.2",
+    "matplotlib": "3.10.7"
+  },
+  "python": "3.11.9",
+  "configs": {
+    "repo_at_export": "configs/ (the repo's yamls at this commit; not necessarily what ran)",
+    "as_run": [
+      "dpo-nll_beta0.01_seed19",
+      "dpo-nll_beta0.05_seed19",
+      "dpo-nll_beta0.1_seed19",
+      "dpo-nll_beta0.3_seed19",
+      "dpo_beta0.01_seed19",
+      "dpo_beta0.05_seed19",
+      "dpo_beta0.1_seed19",
+      "dpo_beta0.3_seed19",
+      "grpo_beta0.01_seed19",
+      "grpo_beta0.04_seed19",
+      "grpo_beta0.0_seed19",
+      "grpo_beta0.1_seed19",
+      "sft-base_seed19",
+      "sft_seed19"
+    ]
+  },
+  "runs": {
+    "dpo-nll_beta0.01_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2151.6,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.01_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2276.4,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.01_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2316.3919,
+      "runtime_source": "trainer_state"
+    },
+    "dpo-nll_beta0.05_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2300.4,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.05_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2246.8,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.05_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2210.1062,
+      "runtime_source": "trainer_state"
+    },
+    "dpo-nll_beta0.1_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2184.4,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.1_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2327.2,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.1_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2159.6101,
+      "runtime_source": "trainer_state"
+    },
+    "dpo-nll_beta0.3_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2352.4,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.3_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2367.6,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo-nll_beta0.3_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2295.7714,
+      "runtime_source": "trainer_state"
+    },
+    "dpo_beta0.01_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2225.7,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.01_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2250.9,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.01_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2236.9249,
+      "runtime_source": "trainer_state"
+    },
+    "dpo_beta0.05_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2138.4,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.05_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2275.7,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.05_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2251.9899,
+      "runtime_source": "trainer_state"
+    },
+    "dpo_beta0.1_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2279.6,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.1_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2118.4,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.1_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2173.0976,
+      "runtime_source": "trainer_state"
+    },
+    "dpo_beta0.3_seed17": {
+      "global_step": 286,
+      "max_steps": 286,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2304.9,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.3_seed18": {
+      "global_step": 290,
+      "max_steps": 290,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2184.6,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "dpo_beta0.3_seed19": {
+      "global_step": 288,
+      "max_steps": 288,
+      "checkpoints": 10,
+      "done": true,
+      "train_runtime_s": 2109.522,
+      "runtime_source": "trainer_state"
+    },
+    "grpo_beta0.01_seed17": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3597.3,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.01_seed18": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3668.9,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.01_seed19": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3554.0299,
+      "runtime_source": "trainer_state"
+    },
+    "grpo_beta0.04_seed17": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3645.5,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.04_seed18": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3684.7,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.04_seed19": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3576.5807,
+      "runtime_source": "trainer_state"
+    },
+    "grpo_beta0.0_seed17": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3433.7,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.0_seed18": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3458.3,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.0_seed19": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3435.0717,
+      "runtime_source": "trainer_state"
+    },
+    "grpo_beta0.1_seed17": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3577.7,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.1_seed18": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3588.7,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "grpo_beta0.1_seed19": {
+      "global_step": 934,
+      "max_steps": 934,
+      "checkpoints": 5,
+      "done": true,
+      "train_runtime_s": 3632.3703,
+      "runtime_source": "trainer_state"
+    },
+    "sft-base_seed17": {
+      "global_step": 72,
+      "max_steps": 72,
+      "checkpoints": 3,
+      "done": true,
+      "train_runtime_s": 389.9,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "sft-base_seed18": {
+      "global_step": 72,
+      "max_steps": 72,
+      "checkpoints": 3,
+      "done": true,
+      "train_runtime_s": 417.9,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "sft-base_seed19": {
+      "global_step": 72,
+      "max_steps": 72,
+      "checkpoints": 3,
+      "done": true,
+      "train_runtime_s": 413.4408,
+      "runtime_source": "trainer_state"
+    },
+    "sft_seed17": {
+      "global_step": 351,
+      "max_steps": 351,
+      "checkpoints": 9,
+      "done": true,
+      "train_runtime_s": 883.6,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "sft_seed18": {
+      "global_step": 351,
+      "max_steps": 351,
+      "checkpoints": 9,
+      "done": true,
+      "train_runtime_s": 934.8,
+      "runtime_source": "estimate: checkpoint mtimes"
+    },
+    "sft_seed19": {
+      "global_step": 351,
+      "max_steps": 351,
+      "checkpoints": 9,
+      "done": true,
+      "train_runtime_s": 841.5162,
+      "runtime_source": "trainer_state"
+    }
+  },
+  "compare": [
+    {
+      "args": "--seed 17 dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2",
+      "file": "tables/compare_1.txt",
+      "status": "ok"
+    },
+    {
+      "args": "--seed 17 dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt2 grpo_beta0.01@ckpt3",
+      "file": "tables/compare_2.txt",
+      "status": "ok"
+    },
+    {
+      "args": "--seed 17 grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5",
+      "file": "tables/compare_3.txt",
+      "status": "ok"
+    },
+    {
+      "args": "--pool dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2",
+      "file": "tables/compare_4.txt",
+      "status": "ok"
+    },
+    {
+      "args": "--pool dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt2 grpo_beta0.01@ckpt3",
+      "file": "tables/compare_5.txt",
+      "status": "ok"
+    },
+    {
+      "args": "--pool grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5",
+      "file": "tables/compare_6.txt",
+      "status": "ok"
+    },
+    {
+      "args": "--pool dpo_beta0.3@ckpt4 grpo_beta0.01@last grpo_beta0.0@last",
+      "file": "tables/compare_7.txt",
+      "status": "ok"
+    }
+  ],
+  "examples": {
+    "seed": 17,
+    "checkpoints": [
+      "sft-base@last",
+      "grpo_beta0.0@last",
+      "dpo_beta0.3@ckpt4",
+      "dpo_beta0.01@last",
+      "dpo-nll_beta0.01@last",
+      "sft@last"
+    ],
+    "prompts": 6
+  },
+  "supersedes": [],
+  "figures_stale": null,
+  "files": {
+    "configs/as_run/dpo-nll_beta0.01_seed19.yaml": 1722,
+    "configs/as_run/dpo-nll_beta0.05_seed19.yaml": 1722,
+    "configs/as_run/dpo-nll_beta0.1_seed19.yaml": 1719,
+    "configs/as_run/dpo-nll_beta0.3_seed19.yaml": 1719,
+    "configs/as_run/dpo_beta0.01_seed19.yaml": 1649,
+    "configs/as_run/dpo_beta0.05_seed19.yaml": 1649,
+    "configs/as_run/dpo_beta0.1_seed19.yaml": 1646,
+    "configs/as_run/dpo_beta0.3_seed19.yaml": 1646,
+    "configs/as_run/grpo_beta0.01_seed19.yaml": 1717,
+    "configs/as_run/grpo_beta0.04_seed19.yaml": 1717,
+    "configs/as_run/grpo_beta0.0_seed19.yaml": 1714,
+    "configs/as_run/grpo_beta0.1_seed19.yaml": 1714,
+    "configs/as_run/sft-base_seed19.yaml": 1487,
+    "configs/as_run/sft_seed19.yaml": 1613,
+    "configs/base.yaml": 1337,
+    "configs/eval.yaml": 1474,
+    "configs/math/m1_sft_gold.yaml": 700,
+    "configs/math/m2_gen_pairs.yaml": 836,
+    "configs/math/m3_arm_dpo.yaml": 1343,
+    "configs/math/m3_arm_dpo_nll.yaml": 1349,
+    "configs/math/m3_arm_grpo.yaml": 786,
+    "configs/math/m3_arm_sft.yaml": 722,
+    "configs/math/sweeps.yaml": 316,
+    "configs/tasks/math.yaml": 1048,
+    "examples/examples.jsonl": 23493,
+    "examples/examples.md": 14169,
+    "figures/diagnostics.png": 160170,
+    "figures/diversity.png": 317033,
+    "figures/dpo_logps.png": 344619,
+    "figures/frontier_math.pdf": 48262,
+    "figures/frontier_math.png": 288804,
+    "figures/pref_logps.png": 203682,
+    "figures/retention.png": 344060,
+    "tables/compare_1.txt": 489,
+    "tables/compare_2.txt": 684,
+    "tables/compare_3.txt": 888,
+    "tables/compare_4.txt": 1531,
+    "tables/compare_5.txt": 2419,
+    "tables/compare_6.txt": 3296,
+    "tables/compare_7.txt": 2418,
+    "tables/frontier.csv": 202273,
+    "tables/frontier_seeds.csv": 99870,
+    "tables/pairs_self_pairs_seed17.json": 268,
+    "tables/pairs_self_pairs_seed18.json": 268,
+    "tables/pairs_self_pairs_seed19.json": 268,
+    "tables/stop_probe_sft-base_seed17.json": 181,
+    "tables/stop_probe_sft-base_seed18.json": 182,
+    "tables/stop_probe_sft-base_seed19.json": 182,
+    "tables/training_curves.csv": 843519
+  },
+  "total_bytes": 2936373
+}

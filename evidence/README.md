@@ -58,5 +58,7 @@ index below from every `MANIFEST.json`. Then update `FINDINGS.md` and `LOG.md`, 
 ## Snapshots
 
 <!-- snapshots:begin -->
-_No snapshots yet: `make evidence TASK=math NAME=<name>`._
+| snapshot | date | seeds | eval prompts | commit | note | superseded by |
+|---|---|---|---|---|---|---|
+| [math/2026-10-23_seeds17-19_full-test](math/2026-10-23_seeds17-19_full-test/) | 2026-10-23 | 17, 18, 19 | 1319 | `3f812b9` | 3 seeds, 1319 prompts |  |
 <!-- snapshots:end -->
