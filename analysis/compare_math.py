@@ -10,9 +10,15 @@ Usage:
     python analysis/compare_math.py [results_root] [--seed N | --pool] RUN@STEP RUN@STEP [...]
     python analysis/compare_math.py dpo_beta0.3@116 grpo_beta0.01@374 grpo_beta0.0@374
     python analysis/compare_math.py --pool dpo_beta0.3@ckpt10 grpo_beta0.01@last
+    python analysis/compare_math.py --pool grpo_beta0.01@kl3 dpo_beta0.3@kl3 dpo-nll_beta0.3@kl3
 
 RUN is a run dir name, or a unique prefix of one (dpo_beta0.3 -> dpo_beta0.3_seed17);
-STEP is a checkpoint step, 'last', or ckptK (the run's K-th checkpoint).
+STEP is a checkpoint step, 'last', ckptK (the run's K-th checkpoint), or klX:
+the run's checkpoint whose kl_k1 (from its eval row) is nearest X nats, picked
+per seed. klX looks at KL only, never at accuracy. The output names the
+checkpoint it picked and marks with ! any whose KL is more than 0.3 nats from X
+(the run has no nearer one), and every paired line whose two checkpoints are
+more than 0.3 nats apart.
 Picking each run's best checkpoint on these same prompts flatters it: compare
 checkpoints chosen some other way (matched KL, a fixed step) where you can.
 
@@ -24,7 +30,8 @@ Several training seeds: a prefix that matches more than one seed's run needs
              that covers training randomness; the per-seed and prompt-pooled
              CIs only cover eval sampling for these particular trained models.
              The DPO arms' step counts differ between seeds (each trains on
-             its own seed's pairs): name their checkpoints by ckptK or last.
+             its own seed's pairs), and so does how far each step moves them:
+             name their checkpoints by klX for matched KL, else ckptK or last.
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ from paths import default_root
 # two-sided 95% t quantiles by degrees of freedom (no scipy needed)
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228,
        15: 2.131, 20: 2.086, 30: 2.042}
+KL_TOL = 0.3  # nats: further apart than this is not "matched KL" (AGENTS.md)
 
 
 def t95(df: int) -> float:
@@ -62,11 +70,27 @@ def matching_runs(eval_root: Path, run: str) -> list[Path]:
     return exact if len(exact) == 1 else runs
 
 
+def sample_files(run_dir: Path) -> dict[int, Path]:
+    return {int(m[1]): p for p in run_dir.glob("checkpoint-*.samples.jsonl")
+            if (m := re.fullmatch(r"checkpoint-(\d+)\.samples\.jsonl", p.name))}
+
+
+def kl_target(step: str) -> float | None:
+    """X for a klX step, else None."""
+    m = re.fullmatch(r"kl(\d+(?:\.\d*)?|\.\d+)", step)
+    return float(m[1]) if m else None
+
+
 def checkpoint_file(run_dir: Path, spec: str, step: str) -> Path:
-    files = {int(m[1]): p for p in run_dir.glob("checkpoint-*.samples.jsonl")
-             if (m := re.fullmatch(r"checkpoint-(\d+)\.samples\.jsonl", p.name))}
+    files = sample_files(run_dir)
     if not files:
         sys.exit(f"{spec!r}: no samples files in {run_dir}")
+    if (target := kl_target(step)) is not None:
+        kls = {s: kl for s, p in files.items() if (kl := kl_of(p)) is not None}
+        if not kls:
+            sys.exit(f"{spec!r}: no kl_k1 in the eval rows of {run_dir.name}")
+        # nearest by KL alone, never by accuracy; a tie goes to the earlier checkpoint
+        return files[min(sorted(kls), key=lambda s: abs(kls[s] - target))]
     if step == "last":
         return files[max(files)]
     if m := re.fullmatch(r"ckpt(\d+)", step):
@@ -81,7 +105,8 @@ def checkpoint_file(run_dir: Path, spec: str, step: str) -> Path:
 
 def split_spec(spec: str) -> tuple[str, str]:
     if "@" not in spec:
-        sys.exit(f"{spec!r}: expected RUN@STEP (e.g. grpo_beta0.01@374, dpo_beta0.3@last or dpo_beta0.3@ckpt10)")
+        sys.exit(f"{spec!r}: expected RUN@STEP (e.g. grpo_beta0.01@374, dpo_beta0.3@last, dpo_beta0.3@ckpt10 "
+                 "or dpo_beta0.3@kl3)")
     return spec.rsplit("@", 1)
 
 
@@ -142,6 +167,37 @@ def kl_of(samples_path: Path) -> float | None:
         return None
 
 
+def fmt_kl(kl: float | None) -> str:
+    return str(kl if kl is None else round(kl, 2))
+
+
+def picked(spec: str, path: Path) -> str:
+    """For a RUN@klX spec, the checkpoint it resolved to and, past KL_TOL, how far its KL is from X."""
+    target = kl_target(split_spec(spec)[1])
+    if target is None:
+        return ""
+    step = int(re.fullmatch(r"checkpoint-(\d+)\.samples\.jsonl", path.name)[1])
+    note = f"  ckpt{sorted(sample_files(path.parent)).index(step) + 1} (step {step})"
+    kl = kl_of(path)
+    if kl is not None and abs(kl - target) > KL_TOL:
+        note += f"  ! {kl - target:+.2f} nats from {target:g}"
+    return note
+
+
+def kl_apart(base: Path, path: Path) -> str:
+    """A note when two compared checkpoints are further apart in KL than KL_TOL."""
+    a, b = kl_of(base), kl_of(path)
+    if a is None or b is None or abs(b - a) <= KL_TOL:
+        return ""
+    return f"  ! KL {b - a:+.2f} nats from the baseline: not matched"
+
+
+def unmatched_note(notes: list[str]) -> None:
+    if any("!" in n for n in notes):
+        print(f"! klX checkpoint more than {KL_TOL} nats from its target: the run has no nearer one, so it is not "
+              "matched KL")
+
+
 def verdict(lo: float, hi: float) -> str:
     return "better" if lo > 0 else "worse" if hi < 0 else "no clear difference"
 
@@ -158,14 +214,16 @@ def compare_one(specs: list[str], paths: list[Path]) -> None:
     scores = [per_prompt(p) for p in paths]
 
     print(f"{'checkpoint':<44} {'prompts':>7} {'pass@1':>7} {'± SE':>6} {'KL k1':>7}")
+    notes = []
     for spec, path, sc in zip(specs, paths, scores):
         mean, se = mean_se(list(sc.values()))
-        kl = kl_of(path)
-        print(f"{spec:<44} {len(sc):>7} {mean:>7.3f} {se:>6.3f} {kl if kl is None else round(kl, 2)!s:>7}")
+        notes.append(picked(spec, path))
+        print(f"{spec:<44} {len(sc):>7} {mean:>7.3f} {se:>6.3f} {fmt_kl(kl_of(path)):>7}{notes[-1]}")
+    unmatched_note(notes)
 
     base_spec, base = specs[0], scores[0]
     print(f"\npaired vs {base_spec} (same prompts; 95% CI = ± 1.96 SE)")
-    for spec, sc in zip(specs[1:], scores[1:]):
+    for spec, path, sc in zip(specs[1:], paths[1:], scores[1:]):
         shared = set(base) & set(sc)
         if len(shared) < max(len(base), len(sc)):
             print(f"  note: {spec} ({len(sc)} prompts) and {base_spec} ({len(base)}) share {len(shared)} questions: "
@@ -176,7 +234,8 @@ def compare_one(specs: list[str], paths: list[Path]) -> None:
             continue
         diff, se, n = res
         lo, hi = diff - 1.96 * se, diff + 1.96 * se
-        print(f"  {spec:<42} {diff:+.3f} ± {se:.3f}  [{lo:+.3f}, {hi:+.3f}]  {verdict(lo, hi)}  ({n} prompts)")
+        print(f"  {spec:<42} {diff:+.3f} ± {se:.3f}  [{lo:+.3f}, {hi:+.3f}]  {verdict(lo, hi)}  ({n} prompts)"
+              f"{kl_apart(paths[0], path)}")
 
 
 def compare_pooled(specs: list[str], files: list[dict[int, Path]]) -> None:
@@ -191,21 +250,23 @@ def compare_pooled(specs: list[str], files: list[dict[int, Path]]) -> None:
     print(f"pooled over seeds {', '.join(map(str, seeds))}\n")
 
     print(f"{'checkpoint':<36} {'seed':>5} {'prompts':>7} {'pass@1':>7} {'± SE':>6} {'KL k1':>7}")
+    notes = []
     for spec, f, sc in zip(specs, files, scores):
         means = []
         for s in seeds:
             mean, se = mean_se(list(sc[s].values()))
             means.append(mean)
-            kl = kl_of(f[s])
-            print(f"{spec:<36} {s:>5} {len(sc[s]):>7} {mean:>7.3f} {se:>6.3f} {kl if kl is None else round(kl, 2)!s:>7}")
+            notes.append(picked(spec, f[s]))
+            print(f"{spec:<36} {s:>5} {len(sc[s]):>7} {mean:>7.3f} {se:>6.3f} {fmt_kl(kl_of(f[s])):>7}{notes[-1]}")
         m, se = mean_se(means)
         print(f"{spec:<36} {'mean':>5} {'':>7} {m:>7.3f} {se:>6.3f}   (± SE across seeds)")
+    unmatched_note(notes)
 
     base_spec, base = specs[0], scores[0]
     n = len(seeds)
     print(f"\npaired vs {base_spec}, per seed (same prompts; ± 1.96 SE over prompts) and across seeds "
           f"(mean of the per-seed differences; ± t{n - 1} SE across seeds)")
-    for spec, sc in zip(specs[1:], scores[1:]):
+    for spec, f, sc in zip(specs[1:], files[1:], scores[1:]):
         diffs = []
         for s in seeds:
             res = paired(base[s], sc[s])
@@ -216,7 +277,7 @@ def compare_pooled(specs: list[str], files: list[dict[int, Path]]) -> None:
             diffs.append(diff)
             lo, hi = diff - 1.96 * se, diff + 1.96 * se
             print(f"  {spec:<34} seed {s:<4} {diff:+.3f} ± {se:.3f}  [{lo:+.3f}, {hi:+.3f}]  {verdict(lo, hi)}  "
-                  f"({k} prompts)")
+                  f"({k} prompts){kl_apart(files[0][s], f[s])}")
         # every seed's per-prompt difference, averaged over seeds: eval noise of the seed-mean only
         shared = sorted(set.intersection(*(set(base[s]) & set(sc[s]) for s in seeds)))
         if len(shared) > 1:
