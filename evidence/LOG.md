@@ -4,6 +4,74 @@ Newest first. One entry per run, incident or decision, with the numbers that mat
 PR or snapshot. Times are the pod's clock. This is the "what happened, including what went wrong" record; the claims
 it leads to live in `FINDINGS.md`.
 
+## 2026-10-23
+
+**First snapshot: [`math/2026-10-23_seeds17-19_full-test`](math/2026-10-23_seeds17-19_full-test/)** (PR #25).
+- **What it holds:** 3 seeds × 112 checkpoints on 1,319 prompts × 8 samples. All 7 `snapshot.yaml` comparisons ran
+  `ok`. 2.8 MB, 50 files.
+- **Exported on the pod** with `make evidence TASK=math NAME=seeds17-19_full-test`.
+- **Its manifest commit, `3f812b9`, isn't on GitHub.** It's the pod checkout's commit in the ADO repo
+  `Personal-Sina-Ghadermarzi`, which carries this repo as a squashed subtree. Its `llm-posttrain-lab/` tree is
+  identical to GitHub `e996453` (tree `365c388`).
+- **Getting it to GitHub:** the pod reaches only that ADO repo. The snapshot was committed there (`6aa0816`) and
+  replayed here unchanged.
+  - The laptop now syncs both directions with `sync_llm_posttrain_lab.sh` in the ADO repo: `status`, `export` to a
+    GitHub branch, and `pull`.
+
+**FINDINGS updated against it.**
+- `supported`: M3, M4, M5, M6, M10.
+- `tentative`: M2, M8, M9.
+- `superseded`: M1 (by M8) and M7 (by M10).
+
+What changed:
+- **The shared curve below ~3 nats (M1) holds only in seed 17.** In seeds 18–19 GRPO is ahead at equal or lower KL.
+- **Pure DPO at β=0.1 also collapses in one seed:** seed 18 ends at 0.166.
+- **DPO+NLL moves up to ~15 nats, not ≈2–8,** and still never collapses.
+- **Continued SFT gains a small amount:** +0.031 [+0.006, +0.056].
+
+**Problem with the fixed comparisons.**
+- `snapshot.yaml` names checkpoints by position, chosen to match KL in seed 17.
+- In seeds 18 and 19 the DPO arms move 1.5–4× further per step. For example, DPO β=0.05 ckpt 2 is at 2.13 / 8.14 /
+  3.05 nats in seeds 17 / 18 / 19 (FINDINGS M9).
+- So the pooled lines aren't matched-KL tests.
+- **Next:** KL-targeted comparisons in `snapshot.yaml`. The KL targets are to be fixed from the design (e.g. 2, 3, 5
+  nats), in their own commit, before a new snapshot. This snapshot stays as exported.
+  - We have seen this snapshot's numbers, so the reason for the change is the KL mismatch above, not the results.
+
+**Open question: why DPO's KL per step varies so much between seeds.**
+- Each seed self-generates its own pairs: 9,598 / 9,764 / 9,663, with similar solve rates. Data order differs too.
+- **A test:** train seeds 18 and 19 on seed 17's pairs. That separates pair-sampling randomness from optimization
+  randomness.
+
+**Seed 19 run** (after `make math-seeds SEEDS="18 19"` resumed seed 18's eval).
+- **Training:**
+
+  | Stage | Finished | Detail |
+  |---|---|---|
+  | π_SFT | 01:57 | stop probe 0.985 |
+  | Pairs | 02:07 | 9,663, solve rate 0.604 |
+  | SFT arm | 02:23 | |
+  | DPO | 03:02 | 288 steps |
+  | DPO+NLL | 03:43 | |
+  | GRPO | 04:43–07:50 | the 4 runs, one after another |
+
+- **Eval and figures** took 07:50–14:12 (about 6.3 h). The whole seed took about 12.4 h.
+- **Training times from `MANIFEST.json`.** Seed 19's are the trainer's own totals; seeds 17–18 are estimated from
+  checkpoint times.
+  - π_SFT ≈ 7 min.
+  - SFT arm 14–16 min.
+  - Each DPO or DPO+NLL run 35–39 min (4 run in parallel).
+  - Each GRPO run 57–61 min.
+- **Rambling at the last checkpoint** (samples hitting the 512-token cap, seeds 17 / 18 / 19):
+  - pure DPO β=0.01: 3% / 20% / 11%;
+  - DPO+NLL: 0–4%;
+  - GRPO: 0%.
+
+**Server shutdown during seed 18's eval** (between 10-22 16:16 and 10-23 01:18).
+- Seed 18 was at 107/112 checkpoints, with one SFT checkpoint halfway through its metric groups.
+- Nothing was lost, because rows are written after every group. `make math-seeds SEEDS="18 19"` finished seed 18's
+  last 5 checkpoints, then ran seed 19.
+
 ## 2026-10-22
 
 **Seed 18 and 19 running** (`make math-seeds SEEDS="17 18 19"`, started about 04:49).
