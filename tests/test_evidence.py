@@ -295,3 +295,17 @@ def test_agent_docs_and_skills() -> None:
         text = (ROOT / ".claude" / "skills" / skill / "SKILL.md").read_text()
         front = text.split("---")[1]
         assert f"name: {skill}" in front and "description:" in front
+
+
+def test_documented_make_evidence_commands_pass_exporter_options_through_evidence_args() -> None:
+    """`make evidence ... --supersedes X` hands --supersedes to make, which exits 2 before exporting
+    (Codex on PR #29): the Makefile forwards exporter options only through EVIDENCE_ARGS."""
+    docs = [ROOT / "README.md", ROOT / "AGENTS.md", *sorted((ROOT / "evidence").glob("*.md")),
+            *sorted((ROOT / ".claude" / "skills").glob("*/SKILL.md"))]
+    bad = []
+    for doc in docs:
+        for n, line in enumerate(doc.read_text().splitlines(), 1):
+            for cmd in re.findall(r"make evidence[^`\n]*", line):
+                if re.search(r"(^|\s)--", re.sub(r"EVIDENCE_ARGS=(\"[^\"]*\"|'[^']*')", "", cmd)):
+                    bad.append(f"{doc.relative_to(ROOT)}:{n}: {cmd}")
+    assert not bad, bad
