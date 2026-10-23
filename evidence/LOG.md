@@ -6,6 +6,33 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-23
 
+**Decision: checkpoint GRPO and PPO 10 times a run, as DPO, and retrain math GRPO for seeds 17–19** (PR #29).
+- **Why:** M2 and M8 can't leave `tentative` with GRPO's 5 checkpoints a run. At the KL targets in `snapshot.yaml`,
+  3 of the 9 GRPO picks miss by more than 0.3 nats (β=0.0 jumps 3.5 → 6.1 nats in seeds 18–19). That leaves most
+  ~5-nat pairs, and some at ~3 nats, unmatched.
+- **Changes:**
+  - `save_steps: 0.2` → `0.1` in `configs/math/m3_arm_grpo.yaml`, `configs/helpful/arm_grpo.yaml` and
+    `configs/helpful/arm_ppo.yaml`. The helpful track hasn't run yet, so it starts with the denser cadence.
+  - Nothing else changes: same β grid, learning rate and steps. The DPO, DPO+NLL and SFT arms keep their runs.
+  - `make status` now warns when a finished run has fewer checkpoints than its config saves (until the reset below,
+    each old GRPO run shows `5 of the 10`).
+- **All three seeds, not one,** so they stay comparable (AGENTS.md). The retrained GRPO runs are new runs, not
+  denser copies of the old ones (vLLM sampling isn't bit-reproducible), so `S/`'s GRPO numbers stay valid only for
+  that snapshot. The next snapshot supersedes it.
+- **On the pod,** after `git pull` and with nothing of the math track running:
+  1. `make status TASK=math`: every m3d run should be flagged `5 of the 10`. Check free disk: the new runs need about
+     360 GB (12 runs × 10 checkpoints × ~3 GB). `--archive` keeps the old ones too (about 180 GB more); without it,
+     they're deleted, but their numbers are already in `S/`.
+  2. `make reset TASK=math RESET_ARGS="--stage m3d --archive --dry-run"`. Check that the plan lists only
+     `grpo_beta*_seed{17,18,19}` run dirs and their eval results, nothing of the other arms.
+  3. `make reset TASK=math RESET_ARGS="--stage m3d --archive --relaunch"`, then type `math` to confirm. This runs
+     `make math-seeds SEEDS="17 18 19"`, which skips every stage still done, retrains GRPO, evaluates only its
+     checkpoints and rebuilds the figures once per seed.
+  4. Expect about 3 h of GRPO training (seed 19's took 3.1 h) plus roughly 2–2.5 h of eval per seed: about 16 h for
+     all three. Follow it with `make status TASK=math`.
+  5. Then `make evidence TASK=math NAME=seeds17-19_dense-grpo EVIDENCE_ARGS="--supersedes math/2026-10-23_seeds17-19_kl-matched"`,
+     commit and push to ADO, and re-check M2, M8 and M9 against the `@kl` lines.
+
 **Snapshot with KL-targeted comparisons: [`math/2026-10-23_seeds17-19_kl-matched`](math/2026-10-23_seeds17-19_kl-matched/)**
 (supersedes `math/2026-10-23_seeds17-19_full-test`).
 - **What's new:** the three `@kl` lines from PR #27, at 2, 3 and 5 nats. All 10 comparisons ran `ok`.

@@ -836,6 +836,12 @@ def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, 
     if done:
         run.state = "done"
         run.finished = (out / DONE_MARKER).stat().st_mtime
+        if run.expected_checkpoints and run.checkpoints < run.expected_checkpoints and not cfg.get("smoke"):
+            # trained under an older save_steps: its frontier has fewer points than the runs it is compared with
+            redo = (f' (make reset TASK={cfg.task} RESET_ARGS="--stage {stage.key} --dry-run", then without '
+                    "--dry-run)") if re.fullmatch(r"m?3[a-d]", stage.key) else ""
+            run.warnings.append(f"finished with {run.checkpoints} of the {run.expected_checkpoints} checkpoints its "
+                                f"config now saves (trained under an older save_steps?): retrain it{redo}")
     elif job is not None:
         run.state = "running"
     elif out.exists() and any(out.iterdir()):
