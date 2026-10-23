@@ -1,0 +1,26 @@
+# Math m2: sample k solutions per train prompt from pi_SFT-math, verify, and
+# build self-generated preference pairs (correct=chosen vs incorrect=rejected)
+# for the DPO arm and the pref_logps eval. Generation knobs live under eval.*
+# so gen_pairs can reuse eval/generate.py:sample_responses unchanged.
+task: math
+stage: gen_pairs
+run_name: gen-pairs
+output_dir: ${data.pairs_path}
+init_from: ${paths.sft_base}
+
+data:
+  split: train
+  max_samples: null
+
+pairs:
+  max_per_prompt: 2
+  test_fraction: 0.05      # held out for the pref_logps eval
+
+eval:
+  samples_per_prompt: 8
+  max_new_tokens: 512
+  # Stage configs don't merge eval.yaml: keep these in sync with it (policy's
+  # own distribution, same as the RL arms and the eval).
+  temperature: 1.0
+  top_p: 1.0
+  use_vllm: true             # HF generate fallback if vllm unavailable

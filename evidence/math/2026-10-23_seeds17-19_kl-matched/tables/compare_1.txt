@@ -1,0 +1,8 @@
+$ python analysis/compare_math.py <root> --seed 17 dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2
+
+checkpoint                                   prompts  pass@1   ± SE   KL k1
+dpo_beta0.05@ckpt2                              1319   0.540  0.010    2.13
+grpo_beta0.01@ckpt2                             1319   0.559  0.010    2.13
+
+paired vs dpo_beta0.05@ckpt2 (same prompts; 95% CI = ± 1.96 SE)
+  grpo_beta0.01@ckpt2                        +0.019 ± 0.005  [+0.009, +0.029]  better  (1319 prompts)

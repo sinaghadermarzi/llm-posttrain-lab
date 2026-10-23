@@ -19,7 +19,10 @@ across-seed CI) · `refuted` · `superseded` (replaced by a sharper claim; say w
 - Picking each arm's best checkpoint on the test prompts flatters it, so prefer the pre-registered comparisons in
   `math/snapshot.yaml`.
 
-> **Last snapshot:** [`math/2026-10-23_seeds17-19_full-test`](math/2026-10-23_seeds17-19_full-test/) (below: `S/`).
+> **Last snapshot:** [`math/2026-10-23_seeds17-19_kl-matched`](math/2026-10-23_seeds17-19_kl-matched/) (below: `S/`).
+> It supersedes `math/2026-10-23_seeds17-19_full-test`. The data and the seven position-matched comparisons are
+> identical, now with KL-gap flags. It adds the three KL-targeted comparisons, `compare_8`–`10`.
+> - Where a History line says `S/` on its own, it was checked against the earlier snapshot.
 > It covers seeds 17, 18 and 19 on the full GSM8K test set (1,319 prompts × 8 samples), and all 336 checkpoints.
 > - **Per-seed numbers** are read from `S/tables/frontier.csv`, and are listed as seed 17 / 18 / 19.
 > - **Across-seed values** are mean ± SE with a 95% CI from t with 2 df (t₂ = 4.30).
@@ -38,10 +41,10 @@ Status: superseded (by M8). Last checked: `S/`, 3 seeds, 2026-10-23.
 The claim holds only in seed 17. M8 states what the three seeds show.
 
 Evidence (seed 17):
-- [`S/tables/compare_1.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_1.txt): at 2.13 nats, matched within
+- [`S/tables/compare_1.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_1.txt): at 2.13 nats, matched within
   0.006 nats, GRPO β=0.01 ckpt 2 beats DPO β=0.05 ckpt 2 by +0.019 ± 0.005, CI [+0.009, +0.029]. So even in seed 17
   this is not a tie.
-- [`S/tables/compare_2.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_2.txt): DPO β=0.3 ckpt 4 (0.576 at
+- [`S/tables/compare_2.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_2.txt): DPO β=0.3 ckpt 4 (0.576 at
   2.66 nats) lies between two GRPO points:
   - GRPO at 2.26 nats is behind it, −0.013 [−0.023, −0.003];
   - GRPO at 3.05 nats is ahead of it, +0.012 [+0.002, +0.022].
@@ -58,47 +61,62 @@ History:
 
 Status: tentative (3 seeds). Last checked: `S/`, 2026-10-23.
 
-The direction holds in every seed and every comparison. Most across-seed CIs still include 0, and the fixed
-comparisons aren't KL-matched in seeds 18–19 (caveats).
+**What the matched pairs establish:** every pair matched within 0.3 nats has GRPO ahead.
+- At ~3 nats that's seeds 17 and 19: DPO β=0.3 −0.018 and −0.047, DPO+NLL β=0.3 −0.029 and −0.050, all with CIs
+  excluding 0.
+- At ~5 nats only seed 17's DPO pair is matched: −0.050.
+
+That falls short of `supported`, which needs matched-KL comparisons across all three seeds. Seed 18's pairs and most
+~5-nat pairs aren't matched, so their across-seed CIs mix accuracy with extra KL.
 
 Evidence:
-- **Most accurate points**, [`S/tables/compare_7.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_7.txt).
-  Not matched KL: GRPO sits further out.
+- **KL-targeted comparisons.** These were fixed in `snapshot.yaml` before this snapshot. Each uses every seed's
+  checkpoint nearest the target. Differences are the DPO arm minus GRPO, across seeds.
+  - **~3 nats,** [`S/tables/compare_9.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_9.txt).
+    - GRPO β=0.01 scores 0.587 ± 0.004, on target in every seed (2.93–3.05 nats).
+    - DPO β=0.3: −0.045 ± 0.016, CI [−0.113, +0.022]. Per seed −0.018 / −0.072 / −0.047.
+    - DPO+NLL β=0.3: −0.049 ± 0.011, CI [−0.096, −0.001]. Per seed −0.029 / −0.068 / −0.050.
+    - Every per-seed CI excludes 0. The pairs are matched in seeds 17 and 19.
+  - **~5 nats,** [`S/tables/compare_10.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_10.txt).
+    - GRPO β=0.0 scores 0.617 ± 0.002.
+    - DPO β=0.3: −0.068 ± 0.015, CI [−0.131, −0.005].
+    - DPO+NLL β=0.3: −0.073 ± 0.014, CI [−0.134, −0.011].
+- **Levelling off,** seed means at the two targets:
 
-  | Checkpoint | pass@1 (17 / 18 / 19) | mean ± SE | KL, nats |
-  |---|---|---|---|
-  | GRPO β=0.0 last | 0.615 / 0.638 / 0.636 | 0.630 ± 0.007 | 4.95 / 7.40 / 7.65 |
-  | GRPO β=0.01 last | 0.605 / 0.599 / 0.594 | 0.599 ± 0.003 | 3.26 / 3.46 / 2.94 |
-  | DPO β=0.3 ckpt 4 (baseline) | 0.576 / 0.530 / 0.547 | 0.551 ± 0.013 | 2.66 / 4.16 / 2.97 |
+  | Arm | ~3 nats | ~5 nats |
+  |---|---|---|
+  | GRPO | 0.587 | 0.617 |
+  | DPO β=0.3 | 0.542 | 0.550 |
+  | DPO+NLL β=0.3 | 0.538 | 0.545 |
 
-  Paired against that DPO checkpoint, every per-seed difference favors GRPO. Across seeds:
-  - GRPO β=0.01 last: +0.048 ± 0.012, CI [−0.002, +0.099];
-  - GRPO β=0.0 last: +0.079 ± 0.021, CI [−0.010, +0.167].
-- **Around 3 nats**, [`S/tables/compare_6.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_6.txt).
-  - The baseline is GRPO β=0.01 ckpt 3: 0.584 ± 0.002 at 2.65–3.05 nats.
-  - Across seeds, against it:
-    - DPO β=0.3 ckpt 5: −0.047 ± 0.015, CI [−0.109, +0.016];
-    - DPO+NLL β=0.1 ckpt 3: −0.063 ± 0.031, CI [−0.198, +0.072];
-    - DPO+NLL β=0.3 ckpt 5: −0.048 ± 0.010, CI [−0.089, −0.007].
-  - Every per-seed difference is negative. In seeds 18–19 those DPO points sit at 4.8–9.3 nats, further out than GRPO.
-- **Derived from `S/tables/frontier.csv`:**
-  - **Best checkpoint at any KL.** GRPO's beats the best DPO or DPO+NLL checkpoint by +0.018 / +0.099 / +0.069.
-    That's +0.062 ± 0.024, CI [−0.040, +0.164].
-  - **Best pass@1 at ≤ 5 nats.** GRPO − DPO is +0.049 ± 0.011, CI [+0.003, +0.096]. GRPO − DPO+NLL is +0.044 ± 0.013,
-    CI [−0.011, +0.098].
+- **Most accurate points,** [`S/tables/compare_7.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_7.txt). Not matched KL: GRPO β=0.0 last
+  scores 0.630 ± 0.007 (4.95–7.65 nats), against DPO β=0.3 ckpt 4's 0.551 ± 0.013.
+- **Derived from `S/tables/frontier.csv`.** Best checkpoint at any KL: GRPO − best DPO or DPO+NLL is +0.062 ± 0.024,
+  CI [−0.040, +0.164].
 
 Caveats:
-- `snapshot.yaml` fixes checkpoints by position. Positions that match KL in seed 17 don't match in seeds 18–19 (M9).
-  So the pooled lines aren't matched-KL tests. KL-targeted comparisons in a new snapshot are what could make this
-  `supported`.
-- Most across-seed CIs include 0. Seed 17's gaps are far smaller than seeds 18–19's, and with 3 seeds t₂ = 4.30.
-- Best-checkpoint numbers flatter every arm.
+- **The ~5-nat matching is imperfect.** GRPO β=0.0 has no checkpoint near 5 nats in seeds 18–19 (6.07 and 6.06), so
+  it sits 0.6–1.5 nats further out than the DPO arms.
+  - Only seed 17's DPO pair is matched. The across-seed CIs above therefore include the effect of GRPO's extra KL, and
+    they can't establish the matched-KL result.
+  - Against that: in seeds 18–19, GRPO β=0.0's earlier checkpoint at 3.52–3.57 nats already scores 0.576 / 0.582
+    ([`compare_5.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_5.txt)).
+  - DPO β=0.3 at 5.47 / 5.39 nats scores 0.520 / 0.564 (`compare_10.txt`). So GRPO is more accurate with less KL.
+  - That reading takes numbers from two different files, unpaired, in two seeds. It's suggestive, not a test.
+- **At ~3 nats DPO's CI includes 0.** DPO+NLL's only just excludes it. Seed 18's DPO-arm checkpoints there sit 1.13
+  and 0.46 nats further out than GRPO's.
+- **This is 3 seeds,** so t₂ = 4.30.
+- **GRPO saves 5 checkpoints per run and DPO 10.** Denser GRPO checkpoints would allow tighter matching.
 
 History:
 - First seen on the 512-prompt eval: GRPO 0.596 at 3.3 nats, 0.616 at 5.1.
 - 2026-10-22, seed 17, full test set: GRPO +0.029 and +0.039 over DPO β=0.3 ckpt 4.
-- 2026-10-23, `S/`, 3 seeds: the gap is larger in seeds 18–19 (up to +0.108). The status stays tentative, for the
-  CI and matching reasons above.
+- 2026-10-23, `math/2026-10-23_seeds17-19_full-test`, 3 seeds: the gap is larger in seeds 18–19 (up to +0.108). It
+  stayed tentative: the position-matched comparisons weren't KL-matched, and their CIs mostly include 0.
+- 2026-10-23, `S/` (KL-targeted comparisons): stays tentative, narrowed to the matched pairs.
+  - Every matched pair favors GRPO: seeds 17 and 19 at ~3 nats, and seed 17 at ~5 nats.
+  - A first draft of this update (PR #28) called it supported, on the strength of the across-seed CIs at ~5 nats.
+    Review pointed out that those mix in unmatched pairs.
 
 ### M3. Pure DPO with small β collapses through likelihood displacement: at β=0.01 in every seed, at β=0.05 in two of three, at β=0.1 in one
 
@@ -227,24 +245,31 @@ History:
 - 2026-10-22, seed 17, full test set: pass@1 0.40–0.47, around π_SFT's 0.43.
 - 2026-10-23, `S/`: superseded by M10.
 
-### M8. Up to ~3 nats GRPO is at or above DPO and DPO+NLL in every seed; DPO comes within about 0.02 only in seed 17
+### M8. At matched KL, GRPO is never behind DPO or DPO+NLL; the only tie is seed 17's DPO at ~2 nats
 
 Status: tentative (3 seeds). Last checked: `S/`, 2026-10-23.
 
 Evidence:
-- **Seed 17:** [`S/tables/compare_1.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_1.txt) and
-  [`compare_2.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_2.txt), as in M1.
-  - At 2.13 nats GRPO is ahead by +0.019, CI [+0.009, +0.029].
-  - At ~2.66 nats DPO β=0.3 ties GRPO's interpolated curve.
-- **Seeds 18 and 19:** GRPO is more accurate at equal or lower KL. From
-  [`compare_4.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_4.txt) and
-  [`compare_5.txt`](math/2026-10-23_seeds17-19_full-test/tables/compare_5.txt):
+- **~2 nats,** [`S/tables/compare_8.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_8.txt). GRPO β=0.01 scores 0.554 ± 0.003. Across
+  seeds:
+  - DPO β=0.3: −0.022 ± 0.015, CI [−0.084, +0.041];
+  - DPO+NLL β=0.3: −0.024 ± 0.014, CI [−0.085, +0.037].
 
-  | Seed | GRPO | DPO | Paired difference |
+  | Pair | Seed | KL (arm vs GRPO) | Difference |
   |---|---|---|---|
-  | 18 | β=0.01 ckpt 3: 0.580 at 2.93 nats | β=0.3 ckpt 4: 0.530 at 4.16 nats | +0.050 ± 0.006 |
-  | 19 | β=0.01 ckpt 3: 0.584 at 2.65 nats | β=0.3 ckpt 4: 0.547 at 2.97 nats | +0.038 ± 0.005 |
-  | 18 | β=0.01 ckpt 2: 0.551 at 2.42 nats | β=0.05 ckpt 2: 0.485 at 8.14 nats | +0.066 ± 0.006 |
+  | DPO β=0.3, matched | 17 | 1.91 vs 2.13 nats | 0.000, CI [−0.010, +0.010]: a tie |
+  | DPO+NLL β=0.3, matched | 19 | 2.12 vs 2.01 nats | −0.018, CI [−0.027, −0.008]: GRPO ahead |
+  | DPO β=0.3, not matched | 18 | 1.48 vs 2.42 nats | −0.049 |
+
+  - The seed-19 gap is under 0.02. But its paired CI excludes 0, so under the tie convention's exception it counts as
+    a GRPO lead, not a tie.
+  - Seed 18 isn't matched: its DPO checkpoints jump from 1.48 to 4.06 nats.
+- **~3 nats,** [`S/tables/compare_9.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_9.txt): GRPO is ahead in every seed. See M2.
+- **Seed 17's position-matched comparisons:**
+  - [`compare_1.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_1.txt): GRPO +0.019, CI [+0.009, +0.029], at 2.13 nats.
+  - [`compare_2.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_2.txt): DPO β=0.3 at 2.66 nats lies between GRPO at 2.26 and 3.05 nats.
+- **No comparison has a DPO arm ahead of GRPO at matched KL.** Of all 10 comparisons, the only per-seed difference
+  in DPO's favor is seed 17 in `compare_2.txt`. There DPO sits 0.39 nats further out than GRPO's 2.26-nat point.
 - **Best pass@1 at ≤ 3 nats** (derived from `S/tables/frontier.csv`):
 
   | Arm | Seed 17 / 18 / 19 |
@@ -253,24 +278,27 @@ Evidence:
   | DPO | 0.576 / 0.502 / 0.547 |
   | DPO+NLL | 0.569 / 0.503 / 0.544 |
 
-  - GRPO − DPO: +0.038 ± 0.027, CI [−0.077, +0.153].
-  - GRPO − DPO+NLL: +0.040 ± 0.024, CI [−0.065, +0.145].
-- `S/figures/frontier_math.png`: the seed-mean GRPO curve lies above both DPO arms from ~1 nat on.
-
 Caveats:
-- The across-seed CIs include 0, because seed 17 is close to a tie.
-- The fixed comparisons are matched by position, not KL, in seeds 18–19 (M9).
-- The best-at-≤-3-nats numbers pick checkpoints by accuracy. That favors the arm with more checkpoints: DPO has 40
-  per seed and GRPO 20, which works against GRPO here.
+- **The ~2-nat across-seed CIs include 0.** The one matched tie (seed 17) is a single pair.
+- **Checkpoint spacing leaves gaps,** with GRPO's 5 checkpoints per run and seed 18's DPO jumps (M9).
+- **The best-at-≤-3-nats numbers pick checkpoints by accuracy.** That favors the arm with more checkpoints (DPO), so
+  it works against GRPO here.
 
-History: 2026-10-23, `S/`: new, replacing M1.
+History:
+- 2026-10-23, `math/2026-10-23_seeds17-19_full-test`: new, replacing M1. Its wording was "Up to ~3 nats GRPO is at
+  or above DPO and DPO+NLL in every seed; DPO comes within about 0.02 only in seed 17".
+- 2026-10-23, `S/` (KL-targeted comparisons): stated at matched KL. It stays tentative.
+  - The only matched tie is still seed 17's DPO at ~2 nats. Seed 19's matched DPO+NLL pair (−0.018) has a paired CI
+    that excludes 0, so it's a GRPO lead.
+  - A first draft of this update (PR #28) counted that pair as a second tie. Review pointed out that the tie
+    convention's paired-CI exception applies.
 
 ### M9. Training randomness dominates DPO's results but not GRPO's: across seeds DPO's pass@1 varies by about 7× its eval SE, GRPO's by about half
 
 Status: tentative (3 seeds). Last checked: `S/`, 2026-10-23.
 
 Evidence: medians over each arm's checkpoints, from
-[`S/tables/frontier_seeds.csv`](math/2026-10-23_seeds17-19_full-test/tables/frontier_seeds.csv).
+[`S/tables/frontier_seeds.csv`](math/2026-10-23_seeds17-19_kl-matched/tables/frontier_seeds.csv).
 
 | Arm | `pass1_seed_se` / `pass1_prompt_se` | Ratio | `kl_k1_seed_se` |
 |---|---|---|---|
@@ -282,13 +310,19 @@ Evidence: medians over each arm's checkpoints, from
 - **The same checkpoint position lands at very different KL for DPO.** DPO β=0.05 ckpt 2 is at 2.13 / 8.14 / 3.05
   nats (`compare_4.txt`). GRPO β=0.01 ckpt 3 is at 3.05 / 2.93 / 2.65.
 - **Seed 17 was DPO's best seed,** so single-seed DPO conclusions were overconfident.
+- **Checkpoints don't always land near a KL target.** In the KL-targeted comparisons
+  ([`S/tables/compare_8.txt`](math/2026-10-23_seeds17-19_kl-matched/tables/compare_8.txt) to `compare_10.txt`), 9 of
+  the 18 DPO-arm picks and 3 of the 9 GRPO picks are more than 0.3 nats from their target.
+  - Seed 18's DPO β=0.3 moves from 1.48 to 4.06 nats between two consecutive checkpoints (29 steps).
 
 Caveats:
 - This is 3 seeds, and much of DPO's spread comes from seed 18.
 - Each seed generates its own DPO pairs, so this mixes data randomness with optimization randomness. Telling them
   apart is an open question in `LOG.md`.
 
-History: 2026-10-23, `S/`: new.
+History:
+- 2026-10-23, `math/2026-10-23_seeds17-19_full-test`: new.
+- 2026-10-23, `S/`: added how far the KL-targeted picks miss their targets.
 
 ### M10. Continued SFT on the gold answers buys only about +0.03 pass@1 for ~7.6 nats of KL, and dips below π_SFT on the way
 
