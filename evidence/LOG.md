@@ -21,12 +21,17 @@ it leads to live in `FINDINGS.md`.
   | ~3 nats | −0.045 [−0.113, +0.022] | −0.049 [−0.096, −0.001] |
   | ~2 nats | −0.022 [−0.084, +0.041] | −0.024 [−0.085, +0.037] |
 
-  - At ~2 nats the two matched pairs are within 0.02.
+  - At ~2 nats there are two matched pairs. Seed 17's DPO is a tie (0.000). Seed 19's DPO+NLL is a GRPO lead: −0.018
+    with a paired CI excluding 0.
   - No comparison has a DPO arm ahead of GRPO at matched KL.
+  - Several pairs are more than 0.3 nats apart, including most at ~5 nats. So the across-seed CIs above aren't
+    matched-KL tests.
 - **FINDINGS:**
-  - M2 → `supported`.
-  - M8 is reworded: a tie at ~2 nats, GRPO ahead from ~3. It stays `tentative`, because the ~2-nat CIs include 0.
+  - M2 stays `tentative`, narrowed to the matched pairs: every matched pair favors GRPO.
+  - M8 is stated at matched KL: never behind, and the only tie is seed 17's DPO at ~2 nats. It stays `tentative`.
   - M9 gains how far the picks miss their targets.
+  - Codex's review of PR #28 caught two errors in the first draft: calling M2 supported from unmatched pairs, and
+    counting a pair whose CI excludes 0 as a tie.
 - **Matching is still imperfect.** 9 of the 18 DPO-arm picks and 3 of the 9 GRPO picks are more than 0.3 nats from
   their target.
   - GRPO β=0.0 jumps from 3.5 to 6.1 nats between checkpoints in seeds 18–19.
