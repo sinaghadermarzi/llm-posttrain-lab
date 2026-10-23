@@ -514,3 +514,41 @@ def test_report_shows_the_stop_probe(repo, tmp_path: Path) -> None:
     (base / "stop_probe.json").write_text(json.dumps({**probe, "mean": 0.97, "min": 0.9}))
     attention, notes = report()
     assert "sft-base_seed17: " not in attention and "mean 0.970" in notes
+
+
+# ---------------------------------------------------------------------------
+# checkpoint cadence: matched-KL comparisons need every arm checkpointed alike
+
+
+@pytest.mark.parametrize("task, arms", [
+    ("math", ["m3_arm_dpo", "m3_arm_dpo_nll", "m3_arm_grpo"]),
+    ("helpful", ["arm_dpo", "arm_grpo", "arm_ppo"]),
+])
+def test_online_arms_save_as_many_checkpoints_as_dpo(task: str, arms: list[str]) -> None:
+    """GRPO saved 5 checkpoints a run against DPO's 10, so in seeds 18 and 19 no
+    GRPO checkpoint fell within 0.3 nats of the DPO arms at the KL targets of
+    evidence/math/snapshot.yaml, and M2/M8 could not be tested there."""
+    from posttrain_lab.config import load_config
+
+    counts = {arm: status.expected_checkpoints(load_config(f"{task}/{arm}.yaml")) for arm in arms}
+    assert set(counts.values()) == {10}, counts
+
+
+def test_a_run_trained_under_an_older_cadence_is_flagged(repo, tmp_path: Path) -> None:
+    math = tmp_path / "results" / "math"
+    old, new = math / "runs" / "grpo_beta0.04_seed17", math / "runs" / "grpo_beta0.1_seed17"
+    for run, n in ((old, 5), (new, 10)):
+        for k in range(1, n + 1):
+            _ckpt(run, 10 * k, 10 * n, loss=0.1)
+        (run / "DONE").touch()
+    run = repo.python("-m", "posttrain_lab.status", "math", "--json", check=False, RESULTS_DIR=str(tmp_path / "results"))
+    assert run.returncode == 0, run.stderr[-3000:]
+    report = json.loads(run.stdout)
+    (track,) = report["tracks"]
+    grpo = {r["name"]: r for s in track["stages"] if s["key"] == "m3d" for r in s["runs"]}
+    assert (grpo[old.name]["checkpoints"], grpo[old.name]["expected_checkpoints"]) == (5, 10)
+    assert grpo[new.name]["warnings"] == []
+    attention = "\n".join(report["attention"])
+    assert f"m3d {old.name}: finished with 5 of the 10 checkpoints" in attention
+    assert 'make reset TASK=math RESET_ARGS="--stage m3d --dry-run"' in attention
+    assert new.name not in attention

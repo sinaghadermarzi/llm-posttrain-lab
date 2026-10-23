@@ -25,4 +25,4 @@ train:
   response_length: 512
   temperature: 1.0
   save_strategy: steps
-  save_steps: 0.2                  # 5 checkpoints per run
+  save_steps: 0.1                  # 10 checkpoints per run, as DPO: matched-KL comparisons need them
