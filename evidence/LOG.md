@@ -30,7 +30,7 @@ it leads to live in `FINDINGS.md`.
      checkpoints and rebuilds the figures once per seed.
   4. Expect about 3 h of GRPO training (seed 19's took 3.1 h) plus roughly 2–2.5 h of eval per seed: about 16 h for
      all three. Follow it with `make status TASK=math`.
-  5. Then `make evidence TASK=math NAME=seeds17-19_dense-grpo --supersedes math/2026-10-23_seeds17-19_kl-matched`,
+  5. Then `make evidence TASK=math NAME=seeds17-19_dense-grpo EVIDENCE_ARGS="--supersedes math/2026-10-23_seeds17-19_kl-matched"`,
      commit and push to ADO, and re-check M2, M8 and M9 against the `@kl` lines.
 
 **Snapshot with KL-targeted comparisons: [`math/2026-10-23_seeds17-19_kl-matched`](math/2026-10-23_seeds17-19_kl-matched/)**
