@@ -4,6 +4,27 @@ Newest first. One entry per run, incident or decision, with the numbers that mat
 PR or snapshot. Times are the pod's clock. This is the "what happened, including what went wrong" record; the claims
 it leads to live in `FINDINGS.md`.
 
+## 2026-10-23
+
+**Decision: KL-targeted comparisons in `snapshot.yaml`** (PR #27).
+- **Why, after the first snapshot's numbers were seen:** that snapshot showed the fixed comparisons aren't
+  matched KL. They name checkpoints by position, chosen to match KL in seed 17. In seeds 18 and 19 the DPO arms move
+  1.5–4× further per step, so the same positions sit at very different KL: DPO β=0.05 ckpt 2 is at 2.13 / 8.14 /
+  3.05 nats in seeds 17 / 18 / 19 (FINDINGS M9). The change is for that mismatch, not for any pass@1.
+- **What changed:** `compare_math.py` takes `RUN@klX`, which picks each seed's checkpoint nearest X nats by `kl_k1`
+  alone. It prints the KL reached and flags any checkpoint more than 0.3 nats from X, and any paired line whose two
+  checkpoints are more than 0.3 nats apart.
+- **New lines, all `--pool`, at targets fixed from the design:** 2, 3 and 5 nats, below, at and above where M1/M2
+  say the arms part.
+  - GRPO β=0.01 is the baseline at 2 and 3 nats. GRPO β=0.0 is the baseline at 5, because β=0.01's KL penalty holds
+    it under ~3.5 nats.
+  - Against DPO β=0.3 and DPO+NLL β=0.3: each arm's largest β moves least per step, so it has the densest checkpoints
+    across 2–5 nats in every seed.
+- **The old position-based lines stay,** so the next snapshot's `compare_1`–`compare_7` are comparable with the
+  first's. The new lines are `compare_8`–`compare_10`.
+- **Next:** a new snapshot on the pod with `--supersedes math/2026-10-23_seeds17-19_full-test`, then M2 and M8
+  re-checked on the new lines. A flagged checkpoint isn't matched KL.
+
 ## 2026-10-22
 
 **Seed 18 and 19 running** (`make math-seeds SEEDS="17 18 19"`, started about 04:49).

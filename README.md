@@ -286,11 +286,16 @@ mixed up. Per-run logs of a seed other than 17 end in `_seedN`
   paired difference per seed, then their mean with a 95% CI from the spread
   across seeds (t with n_seeds − 1 df). Only that last CI covers training
   randomness. With 2 seeds, t₁ = 12.7 makes it very wide; 3 seeds (t₂ = 4.3)
-  is the least that says much. Name DPO checkpoints by position (`@ckpt10`) or
-  `@last`, since their steps differ between seeds.
+  is the least that says much. DPO's steps differ between seeds, and so does
+  how far each step moves it, so name checkpoints by KL target: `@kl3` is each
+  seed's checkpoint whose `kl_k1` is nearest 3 nats, picked by KL alone. The
+  output names the checkpoint picked and flags (`!`) one more than 0.3 nats from
+  the target, and a paired line whose two checkpoints are more than 0.3 nats
+  apart. Position (`@ckpt10`) and `@last` also work, but the same position can
+  sit at very different KL in different seeds.
 
 ```bash
-python analysis/compare_math.py "$RESULTS_DIR/math" --pool dpo_beta0.3@ckpt10 grpo_beta0.01@last
+python analysis/compare_math.py "$RESULTS_DIR/math" --pool grpo_beta0.01@kl3 dpo_beta0.3@kl3 dpo-nll_beta0.3@kl3
 ```
 
 ## Offline cluster (Hugging Face assets)
