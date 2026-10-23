@@ -1,0 +1,24 @@
+# Math arm SFT: continued imitation on gold solutions from pi_SFT-math.
+# No KL knob exists — the frontier curve is traced by checkpoints alone,
+# which is the point of the experiment.
+task: math
+stage: sft
+run_name: arm-sft-math
+output_dir: ${results_root}/runs/sft_seed${seed}
+init_from: ${paths.sft_base}
+
+data:
+  split: train
+  max_samples: null
+
+train:
+  max_length: 1024
+  learning_rate: 1.0e-5
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 2
+  packing: false                 # 1 example = 1 sequence so ckpt spacing tracks examples seen
+  save_strategy: steps
+  save_steps: 0.111              # ~9 checkpoints over 3 epochs

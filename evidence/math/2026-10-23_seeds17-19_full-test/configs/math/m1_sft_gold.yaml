@@ -1,0 +1,22 @@
+# Math m1: build pi_SFT-math from the base model on GSM8K gold chain-of-thought.
+# Instills the '#### N' answer format the verifier depends on; serves as the
+# shared starting point of the math arms AND the KL reference for math eval.
+task: math
+stage: sft
+run_name: sft-base-math
+output_dir: ${results_root}/runs/sft-base_seed${seed}
+
+data:
+  split: train
+  max_samples: null        # full 7.5k
+
+train:
+  max_length: 1024
+  learning_rate: 2.0e-5
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 2   # x4 GPUs -> effective 64
+  packing: true
+  save_strategy: epoch             # only the final pi_SFT-math matters
