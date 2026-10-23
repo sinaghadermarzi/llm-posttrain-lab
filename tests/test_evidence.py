@@ -249,7 +249,7 @@ def test_make_evidence_needs_a_task_and_a_name(repo, results: Path) -> None:
 
 def test_the_math_snapshot_spec_is_well_formed() -> None:
     spec = OmegaConf.to_container(OmegaConf.load(ROOT / "evidence" / "math" / "snapshot.yaml"))
-    spec_re = re.compile(r"[\w.\-]+@(\d+|last|ckpt\d+)")
+    spec_re = re.compile(r"[\w.\-]+@(\d+|last|ckpt\d+|kl\d+(\.\d+)?)")
     for line in spec["compare"]:
         words = line.split()
         flags = [w for w in words if w.startswith("--")]

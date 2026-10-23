@@ -632,3 +632,83 @@ def test_compare_pools_seeds(tmp_path: Path) -> None:
     assert "+0.188 ± 0.062" in seeds_line and "(2 seeds" in seeds_line
     out = _compare(tmp_path, "--pool", "dpo_beta0.3@116", "grpo_beta0.01@last")   # seed 18's DPO has no step 116
     assert out.returncode != 0 and "no checkpoint-116 samples in dpo_beta0.3_seed18" in out.stderr
+
+
+def _kl_samples(root: Path) -> None:
+    """Three seeds whose runs reach a given KL at different checkpoint positions (FINDINGS M9).
+    Every prompt solves k of 8 at a run's k-th checkpoint (GRPO k + 1), so accuracy rises with
+    position while the checkpoint nearest a KL target moves between seeds."""
+    prompts = [f"gsm8k-{i}" for i in range(50)]
+    ev = root / "eval"
+    dpo = {17: ((29, 58, 87, 116), (1.0, 2.0, 3.0, 4.0)),
+           18: ((30, 60, 90, 120), (2.1, 4.2, 6.3, 8.4)),
+           19: ((29, 58, 87, 116), (1.5, 3.1, 4.6, 6.1))}
+    grpo = {17: (1.2, 2.2, 2.9, 3.3, 3.5), 18: (1.0, 2.0, 2.4, 3.2, 3.6), 19: (1.4, 2.6, 3.0, 3.4, 3.9)}
+    for seed, (steps, kls) in dpo.items():
+        for k, (step, kl) in enumerate(zip(steps, kls), 1):
+            _samples(ev / f"dpo_beta0.3_seed{seed}" / f"checkpoint-{step}.samples.jsonl", {p: k for p in prompts}, kl)
+        for k, (step, kl) in enumerate(zip((75, 150, 225, 300, 374), grpo[seed]), 1):
+            _samples(ev / f"grpo_beta0.01_seed{seed}" / f"checkpoint-{step}.samples.jsonl",
+                     {p: k + 1 for p in prompts}, kl)
+
+
+def _row_of(out: str, *words: str) -> str:
+    return next(ln for ln in out.splitlines() if all(w in ln for w in words))
+
+
+def test_compare_kl_target_picks_the_nearest_checkpoint_per_seed(tmp_path: Path) -> None:
+    _kl_samples(tmp_path)
+    out = _compare(tmp_path, "--seed", "19", "dpo_beta0.3@kl3", "grpo_beta0.01@kl3")
+    assert out.returncode == 0, out.stderr
+    # KL 3.1 is nearest 3, though ckpt 4 (6.1 nats) solves more: KL alone picks
+    row = _row_of(out.stdout, "dpo_beta0.3@kl3", "3.1")
+    assert "ckpt2 (step 58)" in row and "!" not in row and "0.250" in row
+    assert "ckpt3 (step 225)" in _row_of(out.stdout, "grpo_beta0.01@kl3 ", "3.0")
+    paired = out.stdout.split("paired vs", 1)[1]
+    assert "+0.250 ± 0.000" in paired and "not matched" not in paired
+    assert "nats from its target" not in out.stdout
+    # seed 18's DPO reaches 3 nats nowhere near a checkpoint: 2.1 is nearest, flagged, and so is the pair
+    out = _compare(tmp_path, "--seed", "18", "grpo_beta0.01@kl3", "dpo_beta0.3@kl3")
+    assert out.returncode == 0, out.stderr
+    assert "ckpt1 (step 30)  ! -0.90 nats from 3" in _row_of(out.stdout, "dpo_beta0.3@kl3", "2.1")
+    assert "more than 0.3 nats from its target" in out.stdout
+    assert "! KL -1.10 nats from the baseline: not matched" in out.stdout.split("paired vs", 1)[1]
+
+
+def test_compare_kl_target_edges(tmp_path: Path) -> None:
+    _kl_samples(tmp_path)
+    # past the end of a run: its last checkpoint, flagged
+    out = _compare(tmp_path, "--seed", "17", "dpo_beta0.3@kl2.5", "grpo_beta0.01@kl5")
+    assert out.returncode == 0, out.stderr
+    assert "ckpt5 (step 374)  ! -1.50 nats from 5" in _row_of(out.stdout, "grpo_beta0.01@kl5")
+    # 2.0 and 3.0 are equally near 2.5: the earlier checkpoint
+    assert "ckpt2 (step 58)" in _row_of(out.stdout, "dpo_beta0.3@kl2.5", "2.0")
+    # step and position specs are unchanged and get no klX notes, but a KL gap between a pair is still flagged
+    out = _compare(tmp_path, "--seed", "18", "dpo_beta0.3@ckpt1", "grpo_beta0.01@last")
+    assert out.returncode == 0, out.stderr
+    assert "(step " not in out.stdout and "nats from its target" not in out.stdout
+    assert "! KL +1.50 nats from the baseline" in out.stdout
+    for f in (tmp_path / "eval" / "dpo_beta0.3_seed17").glob("checkpoint-*.jsonl"):
+        if not f.name.endswith(".samples.jsonl"):
+            f.unlink()
+    out = _compare(tmp_path, "--seed", "17", "dpo_beta0.3@kl3", "grpo_beta0.01@kl3")
+    assert out.returncode != 0 and "no kl_k1 in the eval rows of dpo_beta0.3_seed17" in out.stderr
+
+
+def test_compare_pools_kl_targets(tmp_path: Path) -> None:
+    _kl_samples(tmp_path)
+    out = _compare(tmp_path, "--pool", "grpo_beta0.01@kl3", "dpo_beta0.3@kl3")
+    assert out.returncode == 0, out.stderr
+    assert "pooled over seeds 17, 18, 19" in out.stdout
+    # each seed's own nearest checkpoint: DPO ckpt 3 / 1 / 2, GRPO ckpt 3 / 4 / 3
+    for seed, kl, ckpt in ((17, "3.0", "ckpt3 (step 87)"), (18, "2.1", "ckpt1 (step 30)"),
+                           (19, "3.1", "ckpt2 (step 58)")):
+        assert ckpt in _row_of(out.stdout, "dpo_beta0.3@kl3", f" {seed} ", kl)
+    assert "! -0.90 nats from 3" in _row_of(out.stdout, "dpo_beta0.3@kl3", " 18 ")
+    assert "ckpt4 (step 300)" in _row_of(out.stdout, "grpo_beta0.01@kl3", " 18 ", "3.2")
+    paired = out.stdout.split("paired vs", 1)[1]
+    assert re.search(r"seed 17\s+-0\.125", paired) and re.search(r"seed 18\s+-0\.500", paired)
+    assert re.search(r"seed 19\s+-0\.250", paired)
+    assert "not matched" in _row_of(paired, "seed 18") and "not matched" not in _row_of(paired, "seed 17")
+    seeds_line = next(ln for ln in paired.splitlines() if "t2 = 4.30" in ln)
+    assert "-0.292 ± 0.110" in seeds_line and "(3 seeds" in seeds_line

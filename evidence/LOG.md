@@ -6,6 +6,24 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-23
 
+**Decision: KL-targeted comparisons in `snapshot.yaml`** (PR #27). This follows up "Problem with the fixed
+comparisons" below.
+- **Why it changed after this snapshot's numbers were seen:** the position-based lines turned out not to match KL
+  in seeds 18–19 (M9). The change is for that mismatch, not for any pass@1.
+- **`compare_math.py` takes `RUN@klX`.** It picks each seed's checkpoint nearest X nats by `kl_k1` alone and prints
+  the KL reached. It flags any checkpoint more than 0.3 nats from X, and any paired line whose two checkpoints are
+  more than 0.3 nats apart.
+- **New lines, all `--pool`, at the targets fixed from the design:** 2, 3 and 5 nats, below, at and above where M1/M2
+  say the arms part.
+  - GRPO β=0.01 is the baseline at 2 and 3 nats. GRPO β=0.0 is the baseline at 5, because β=0.01's KL penalty holds
+    it under ~3.5 nats.
+  - Against DPO β=0.3 and DPO+NLL β=0.3: each arm's largest β moves least per step, so it has the densest checkpoints
+    across 2–5 nats in every seed.
+- **The old position-based lines stay,** so the next snapshot's `compare_1`–`compare_7` are comparable with this
+  one's. The new lines are `compare_8`–`compare_10`.
+- **Next:** a new snapshot on the pod with `--supersedes math/2026-10-23_seeds17-19_full-test`, then M2 and M8
+  re-checked on the new lines. A flagged checkpoint isn't matched KL.
+
 **First snapshot: [`math/2026-10-23_seeds17-19_full-test`](math/2026-10-23_seeds17-19_full-test/)** (PR #25).
 - **What it holds:** 3 seeds × 112 checkpoints on 1,319 prompts × 8 samples. All 7 `snapshot.yaml` comparisons ran
   `ok`. 2.8 MB, 50 files.

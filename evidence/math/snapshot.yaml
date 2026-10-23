@@ -5,8 +5,9 @@
 
 # analysis/compare_math.py argument lines, each saved as tables/compare_<i>.txt.
 # The first checkpoint of a line is the baseline. Checkpoints are named by
-# position (ckptK) or last: DPO step counts differ between seeds (own pairs).
-# Matched KL from seed 17 on the full test set (FINDINGS.md M1, M2); a line
+# position (ckptK), last, or KL target (klX): DPO step counts differ between
+# seeds (own pairs). The ckptK lines match KL in seed 17 on the full test set
+# (FINDINGS.md M1, M2); the klX lines at the end match it in every seed. A line
 # that can't run yet (a seed not trained) records why and the export goes on.
 compare:
   # ~2.13 nats: DPO beta 0.05 and GRPO beta 0.01 within 0.006 nats (M1)
@@ -21,6 +22,21 @@ compare:
   - --pool grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
   # best-looking points (not matched KL: GRPO sits further out; say so wherever it's used)
   - --pool dpo_beta0.3@ckpt4 grpo_beta0.01@last grpo_beta0.0@last
+  # Matched KL in every seed (added 2026-10-23, after the first snapshot): the
+  # positions above match KL in seed 17 only, since seeds 18-19's DPO arms move
+  # 1.5-4x further per step (FINDINGS M9). klX takes each seed's checkpoint
+  # nearest X nats, by KL alone; the output flags any more than 0.3 nats off.
+  # Targets 2, 3 and 5 nats are fixed from the design, not from accuracy: below,
+  # at and above the ~3 nats where M1/M2 say the arms part. Runs by beta, the
+  # same at every target:
+  # - GRPO baseline: beta 0.01 at 2 and 3 nats; its KL penalty holds it under
+  #   ~3.5 nats, so beta 0.0 (unconstrained) is GRPO's only run that reaches 5;
+  # - DPO and DPO+NLL at beta 0.3, each arm's largest beta: the smallest move per
+  #   step, so the densest checkpoints across 2-5 nats in every seed (smaller
+  #   betas skip past these targets within a checkpoint or two in seeds 18-19).
+  - --pool grpo_beta0.01@kl2 dpo_beta0.3@kl2 dpo-nll_beta0.3@kl2
+  - --pool grpo_beta0.01@kl3 dpo_beta0.3@kl3 dpo-nll_beta0.3@kl3
+  - --pool grpo_beta0.0@kl5 dpo_beta0.3@kl5 dpo-nll_beta0.3@kl5
 
 # Responses to the same questions from these checkpoints (sample 0 each),
 # the questions they disagree on first. For the write-up: what collapse,
