@@ -1,0 +1,29 @@
+$ python analysis/compare_math.py <root> --pool dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt2 grpo_beta0.01@ckpt3
+
+pooled over seeds 17, 18, 19
+
+checkpoint                            seed prompts  pass@1   ± SE   KL k1
+dpo_beta0.3@ckpt4                       17    1319   0.576  0.010    2.66
+dpo_beta0.3@ckpt4                       18    1319   0.530  0.010    4.16
+dpo_beta0.3@ckpt4                       19    1319   0.547  0.010    2.97
+dpo_beta0.3@ckpt4                     mean           0.551  0.013   (± SE across seeds)
+grpo_beta0.0@ckpt2                      17    1319   0.563  0.010    2.26
+grpo_beta0.0@ckpt2                      18    1319   0.576  0.010    3.52
+grpo_beta0.0@ckpt2                      19    1319   0.582  0.010    3.57
+grpo_beta0.0@ckpt2                    mean           0.574  0.006   (± SE across seeds)
+grpo_beta0.01@ckpt3                     17    1319   0.588  0.010    3.05
+grpo_beta0.01@ckpt3                     18    1319   0.580  0.010    2.93
+grpo_beta0.01@ckpt3                     19    1319   0.584  0.010    2.65
+grpo_beta0.01@ckpt3                   mean           0.584  0.002   (± SE across seeds)
+
+paired vs dpo_beta0.3@ckpt4, per seed (same prompts; ± 1.96 SE over prompts) and across seeds (mean of the per-seed differences; ± t2 SE across seeds)
+  grpo_beta0.0@ckpt2                 seed 17   -0.013 ± 0.005  [-0.023, -0.003]  worse  (1319 prompts)  ! KL -0.39 nats from the baseline: not matched
+  grpo_beta0.0@ckpt2                 seed 18   +0.046 ± 0.006  [+0.035, +0.057]  better  (1319 prompts)  ! KL -0.64 nats from the baseline: not matched
+  grpo_beta0.0@ckpt2                 seed 19   +0.035 ± 0.005  [+0.025, +0.046]  better  (1319 prompts)  ! KL +0.60 nats from the baseline: not matched
+  grpo_beta0.0@ckpt2                 prompts   +0.023 ± 0.003  [+0.016, +0.030]  (seed-mean per prompt; eval noise only)
+  grpo_beta0.0@ckpt2                 seeds     +0.023 ± 0.018  [-0.055, +0.101]  no clear difference  (3 seeds, t2 = 4.30)
+  grpo_beta0.01@ckpt3                seed 17   +0.012 ± 0.005  [+0.002, +0.022]  better  (1319 prompts)  ! KL +0.39 nats from the baseline: not matched
+  grpo_beta0.01@ckpt3                seed 18   +0.050 ± 0.006  [+0.039, +0.061]  better  (1319 prompts)  ! KL -1.23 nats from the baseline: not matched
+  grpo_beta0.01@ckpt3                seed 19   +0.038 ± 0.005  [+0.027, +0.048]  better  (1319 prompts)  ! KL -0.32 nats from the baseline: not matched
+  grpo_beta0.01@ckpt3                prompts   +0.033 ± 0.003  [+0.027, +0.040]  (seed-mean per prompt; eval noise only)
+  grpo_beta0.01@ckpt3                seeds     +0.033 ± 0.011  [-0.015, +0.082]  no clear difference  (3 seeds, t2 = 4.30)

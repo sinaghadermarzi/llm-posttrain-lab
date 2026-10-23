@@ -6,6 +6,39 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-23
 
+**Snapshot with KL-targeted comparisons: [`math/2026-10-23_seeds17-19_kl-matched`](math/2026-10-23_seeds17-19_kl-matched/)**
+(supersedes `math/2026-10-23_seeds17-19_full-test`).
+- **What's new:** the three `@kl` lines from PR #27, at 2, 3 and 5 nats. All 10 comparisons ran `ok`.
+  `frontier.csv`, `frontier_seeds.csv` and the seven old comparisons' numbers are identical to the earlier snapshot;
+  only the new KL-gap flags were added. 2.8 MB, 53 files.
+- **Exported on the pod** (ADO `43fb505`) and replayed here by `sync_llm_posttrain_lab.sh export`. The script checks
+  that the replayed tree equals the ADO subtree before pushing.
+- **What it showed.** Across seeds, the DPO arms minus GRPO:
+
+  | Target | DPO β=0.3 | DPO+NLL β=0.3 |
+  |---|---|---|
+  | ~5 nats | −0.068 [−0.131, −0.005] | −0.073 [−0.134, −0.011] |
+  | ~3 nats | −0.045 [−0.113, +0.022] | −0.049 [−0.096, −0.001] |
+  | ~2 nats | −0.022 [−0.084, +0.041] | −0.024 [−0.085, +0.037] |
+
+  - At ~2 nats there are two matched pairs. Seed 17's DPO is a tie (0.000). Seed 19's DPO+NLL is a GRPO lead: −0.018
+    with a paired CI excluding 0.
+  - No comparison has a DPO arm ahead of GRPO at matched KL.
+  - Several pairs are more than 0.3 nats apart, including most at ~5 nats. So the across-seed CIs above aren't
+    matched-KL tests.
+- **FINDINGS:**
+  - M2 stays `tentative`, narrowed to the matched pairs: every matched pair favors GRPO.
+  - M8 is stated at matched KL: never behind, and the only tie is seed 17's DPO at ~2 nats. It stays `tentative`.
+  - M9 gains how far the picks miss their targets.
+  - Codex's review of PR #28 caught two errors in the first draft: calling M2 supported from unmatched pairs, and
+    counting a pair whose CI excludes 0 as a tie.
+- **Matching is still imperfect.** 9 of the 18 DPO-arm picks and 3 of the 9 GRPO picks are more than 0.3 nats from
+  their target.
+  - GRPO β=0.0 jumps from 3.5 to 6.1 nats between checkpoints in seeds 18–19.
+  - Seed 18's DPO β=0.3 jumps from 1.48 to 4.06 nats in 29 steps.
+  - **For future runs:** save GRPO checkpoints more often (`save_steps: 0.1`, as DPO does), so that matched-KL
+    comparisons have points to match. Changing it now would make new seeds unlike 17–19.
+
 **Decision: KL-targeted comparisons in `snapshot.yaml`** (PR #27). This follows up "Problem with the fixed
 comparisons" below.
 - **Why it changed after this snapshot's numbers were seen:** the position-based lines turned out not to match KL

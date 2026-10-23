@@ -1,0 +1,38 @@
+$ python analysis/compare_math.py <root> --pool grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
+
+pooled over seeds 17, 18, 19
+
+checkpoint                            seed prompts  pass@1   ± SE   KL k1
+grpo_beta0.01@ckpt3                     17    1319   0.588  0.010    3.05
+grpo_beta0.01@ckpt3                     18    1319   0.580  0.010    2.93
+grpo_beta0.01@ckpt3                     19    1319   0.584  0.010    2.65
+grpo_beta0.01@ckpt3                   mean           0.584  0.002   (± SE across seeds)
+dpo_beta0.3@ckpt5                       17    1319   0.570  0.010    3.16
+dpo_beta0.3@ckpt5                       18    1319   0.520  0.010    5.47
+dpo_beta0.3@ckpt5                       19    1319   0.522  0.010    5.74
+dpo_beta0.3@ckpt5                     mean           0.537  0.016   (± SE across seeds)
+dpo-nll_beta0.1@ckpt3                   17    1319   0.575  0.010    3.15
+dpo-nll_beta0.1@ckpt3                   18    1319   0.460  0.009    9.25
+dpo-nll_beta0.1@ckpt3                   19    1319   0.529  0.010    5.56
+dpo-nll_beta0.1@ckpt3                 mean           0.521  0.033   (± SE across seeds)
+dpo-nll_beta0.3@ckpt5                   17    1319   0.558  0.010    2.99
+dpo-nll_beta0.3@ckpt5                   18    1319   0.519  0.010    4.77
+dpo-nll_beta0.3@ckpt5                   19    1319   0.531  0.010    4.83
+dpo-nll_beta0.3@ckpt5                 mean           0.536  0.012   (± SE across seeds)
+
+paired vs grpo_beta0.01@ckpt3, per seed (same prompts; ± 1.96 SE over prompts) and across seeds (mean of the per-seed differences; ± t2 SE across seeds)
+  dpo_beta0.3@ckpt5                  seed 17   -0.018 ± 0.005  [-0.028, -0.007]  worse  (1319 prompts)
+  dpo_beta0.3@ckpt5                  seed 18   -0.060 ± 0.006  [-0.072, -0.049]  worse  (1319 prompts)  ! KL +2.54 nats from the baseline: not matched
+  dpo_beta0.3@ckpt5                  seed 19   -0.062 ± 0.006  [-0.074, -0.051]  worse  (1319 prompts)  ! KL +3.09 nats from the baseline: not matched
+  dpo_beta0.3@ckpt5                  prompts   -0.047 ± 0.004  [-0.054, -0.039]  (seed-mean per prompt; eval noise only)
+  dpo_beta0.3@ckpt5                  seeds     -0.047 ± 0.015  [-0.109, +0.016]  no clear difference  (3 seeds, t2 = 4.30)
+  dpo-nll_beta0.1@ckpt3              seed 17   -0.012 ± 0.005  [-0.023, -0.002]  worse  (1319 prompts)
+  dpo-nll_beta0.1@ckpt3              seed 18   -0.120 ± 0.007  [-0.134, -0.106]  worse  (1319 prompts)  ! KL +6.32 nats from the baseline: not matched
+  dpo-nll_beta0.1@ckpt3              seed 19   -0.056 ± 0.006  [-0.067, -0.044]  worse  (1319 prompts)  ! KL +2.91 nats from the baseline: not matched
+  dpo-nll_beta0.1@ckpt3              prompts   -0.063 ± 0.004  [-0.070, -0.055]  (seed-mean per prompt; eval noise only)
+  dpo-nll_beta0.1@ckpt3              seeds     -0.063 ± 0.031  [-0.198, +0.072]  no clear difference  (3 seeds, t2 = 4.30)
+  dpo-nll_beta0.3@ckpt5              seed 17   -0.029 ± 0.005  [-0.040, -0.019]  worse  (1319 prompts)
+  dpo-nll_beta0.3@ckpt5              seed 18   -0.061 ± 0.006  [-0.072, -0.049]  worse  (1319 prompts)  ! KL +1.84 nats from the baseline: not matched
+  dpo-nll_beta0.3@ckpt5              seed 19   -0.054 ± 0.006  [-0.065, -0.042]  worse  (1319 prompts)  ! KL +2.18 nats from the baseline: not matched
+  dpo-nll_beta0.3@ckpt5              prompts   -0.048 ± 0.004  [-0.055, -0.041]  (seed-mean per prompt; eval noise only)
+  dpo-nll_beta0.3@ckpt5              seeds     -0.048 ± 0.010  [-0.089, -0.007]  worse  (3 seeds, t2 = 4.30)
