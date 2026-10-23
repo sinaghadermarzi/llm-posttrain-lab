@@ -1,0 +1,55 @@
+seed: 19
+task: math
+results_root: /home/jovyan/shared-data/sina_storage/llm_posttrain/llm-posttrain-results/math
+model:
+  base: Qwen/Qwen2.5-1.5B
+  dtype: bfloat16
+  attn_implementation: flash_attention_2
+data:
+  split: train
+  max_samples: null
+  pairs_path: /home/jovyan/shared-data/sina_storage/llm_posttrain/llm-posttrain-results/math/data/self_pairs_seed19
+paths:
+  sft_base: /home/jovyan/shared-data/sina_storage/llm_posttrain/llm-posttrain-results/math/runs/sft-base_seed19
+  reward_model: /home/jovyan/shared-data/sina_storage/llm_posttrain/llm-posttrain-results/math/runs/rm_seed19
+train:
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_only_model: true
+  save_total_limit: null
+  report_to: mlflow
+  remove_unused_columns: false
+  max_length: 1024
+  learning_rate: 2.0e-05
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 2
+  packing: true
+  save_strategy: epoch
+mlflow:
+  experiment: llm-posttrain-lab-math
+  tracking_uri: null
+dataset:
+  id: openai/gsm8k
+  config: main
+  format: gsm8k
+eval:
+  prompts_split: test
+  num_prompts: 1319
+  samples_per_prompt: 8
+  pass_k: 8
+  metric_groups:
+  - core_math
+  - retention_ppl
+  - retention_harness
+  - diversity
+  - pref_logps
+  pref_logps:
+    split: test
+    num_pairs: 256
+stage: sft
+run_name: sft-base-math
+output_dir: /home/jovyan/shared-data/sina_storage/llm_posttrain/llm-posttrain-results/math/runs/sft-base_seed19
