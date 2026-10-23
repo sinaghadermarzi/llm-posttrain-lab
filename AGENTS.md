@@ -54,8 +54,9 @@ fails without it.
 - **KL:** use `kl_k1` (nats per sequence). `kl_k3` explodes far from π_SFT.
 - **Ties:** pass@1 differences of 0.02 or less count as ties unless a paired CI says otherwise.
 - **Compare at matched KL,** within about 0.3 nats, using `analysis/compare_math.py`.
-  - Name DPO checkpoints `@ckptK` or `@last`: their step counts differ between seeds, because each seed trains on its
-    own pairs.
+  - Name checkpoints by KL target, `@klX`: each seed's checkpoint nearest X nats by `kl_k1`. DPO's step counts and KL
+    per step differ between seeds (each seed trains on its own pairs), so the same `@ckptK` can sit at very different
+    KL. A checkpoint flagged `!` is more than 0.3 nats off: not matched.
   - Only `--pool`'s across-seed line covers training randomness; per-seed CIs cover eval sampling only.
 - **Picking each arm's best checkpoint on the test prompts flatters it.** Prefer the comparisons fixed in advance in
   `evidence/<task>/snapshot.yaml`, and say so when a comparison isn't one of them.

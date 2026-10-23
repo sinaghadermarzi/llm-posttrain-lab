@@ -24,7 +24,8 @@ Every stage the snapshot is about must be DONE.
 
 Read `evidence/<task>/snapshot.yaml`. If the user wants different comparisons or example checkpoints, change it in
 its own commit before exporting, and say why in `evidence/LOG.md`. Never change it after seeing the numbers it
-would produce.
+would produce. If an earlier snapshot already showed them, the reason must be something other than the results
+(e.g. its comparisons turned out not KL-matched): say that plainly in the LOG entry.
 
 ## 3. Dry run, then export
 
