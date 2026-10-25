@@ -202,17 +202,51 @@ def _nccl_allreduce(world: int) -> Result:
 # -------------------------------------------------- training/inference libs
 
 
+def flash_kernel_fallback() -> tuple[str | None, str]:
+    """What transformers loads for attn_implementation=flash_attention_2 when
+    flash-attn isn't installed: with the `kernels` package, the hub kernel
+    kernels-community/flash-attn2 (from the HF cache when offline). Tried on a
+    tiny randomly initialized Qwen2 on the GPU, as the stages load models:
+    (the attention it ended up with, None if it failed) and why."""
+    try:
+        import kernels  # noqa: F401
+    except ImportError:
+        return None, "the kernels package isn't installed either"
+    import torch
+
+    if not torch.cuda.is_available():
+        return None, "no GPU to try the kernels fallback on"
+    from transformers import AutoModelForCausalLM, Qwen2Config
+
+    tiny = Qwen2Config(vocab_size=128, hidden_size=64, intermediate_size=128, num_hidden_layers=1,
+                       num_attention_heads=4, num_key_value_heads=2)
+    try:
+        model = AutoModelForCausalLM.from_config(tiny, attn_implementation="flash_attention_2",
+                                                 dtype=torch.bfloat16).cuda()
+        model(torch.ones(1, 8, dtype=torch.long, device="cuda"))
+    except Exception as e:  # noqa: BLE001 — any failure here means stages would fail too
+        return None, f"the kernels fallback failed: {type(e).__name__}: {e}"
+    return str(model.config._attn_implementation), ""
+
+
 def check_flash_attn() -> Result:
-    """flash-attn import + a tiny kernel call (base.yaml asks for flash_attention_2)."""
+    """flash-attn import + a tiny kernel call (base.yaml asks for flash_attention_2),
+    else the `kernels` fallback transformers uses without it."""
     cfg = load_config("helpful/stage1_sft_base.yaml", [])
     wanted = str(cfg.model.attn_implementation) == "flash_attention_2"
     try:
         import flash_attn
         from flash_attn import flash_attn_func
     except ImportError as e:
-        level = "FAIL" if wanted else "INFO"
-        return [(level, f"flash-attn not importable ({e}); base.yaml attn_implementation="
-                        f"{cfg.model.attn_implementation} — install it or set it to sdpa")]
+        if not wanted:
+            return [("INFO", f"flash-attn not importable ({e}); base.yaml attn_implementation="
+                             f"{cfg.model.attn_implementation}, so it isn't needed")]
+        used, why = flash_kernel_fallback()
+        if used:
+            return [("OK", f"flash-attn not installed; transformers uses {used} from the kernels library instead "
+                           "(a tiny model ran a forward pass with it)")]
+        return [("FAIL", f"flash-attn not importable ({e}) and {why}; base.yaml attn_implementation="
+                         f"{cfg.model.attn_implementation} — install flash-attn or kernels, or set it to sdpa")]
     import torch
 
     out: Result = [("OK", f"flash-attn {flash_attn.__version__}")]
