@@ -61,5 +61,6 @@ index below from every `MANIFEST.json`. Then update `FINDINGS.md` and `LOG.md`, 
 | snapshot | date | seeds | eval prompts | commit | note | superseded by |
 |---|---|---|---|---|---|---|
 | [math/2026-10-23_seeds17-19_full-test](math/2026-10-23_seeds17-19_full-test/) | 2026-10-23 | 17, 18, 19 | 1319 | `3f812b9` | 3 seeds, 1319 prompts | math/2026-10-23_seeds17-19_kl-matched |
-| [math/2026-10-23_seeds17-19_kl-matched](math/2026-10-23_seeds17-19_kl-matched/) | 2026-10-23 | 17, 18, 19 | 1319 | `3eea8a8` | 3 seeds, KL-targeted comparisons |  |
+| [math/2026-10-23_seeds17-19_kl-matched](math/2026-10-23_seeds17-19_kl-matched/) | 2026-10-23 | 17, 18, 19 | 1319 | `3eea8a8` | 3 seeds, KL-targeted comparisons | math/2026-10-25_seeds17-19_dense-grpo |
+| [math/2026-10-25_seeds17-19_dense-grpo](math/2026-10-25_seeds17-19_dense-grpo/) | 2026-10-25 | 17, 18, 19 | 1319 | `62a8fde` |  |  |
 <!-- snapshots:end -->

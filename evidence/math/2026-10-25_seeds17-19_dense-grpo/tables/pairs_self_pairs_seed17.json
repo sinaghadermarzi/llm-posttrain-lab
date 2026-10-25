@@ -1,0 +1,12 @@
+{
+  "prompts": 7473,
+  "samples": 59784,
+  "sample_solve_rate": 0.5999264017128328,
+  "pairs": 9598,
+  "prompts_all_correct": 1228,
+  "prompts_all_wrong": 547,
+  "prompts_no_finished_correct": 0,
+  "samples_unfinished": 24,
+  "train_pairs": 9119,
+  "test_pairs": 479
+}

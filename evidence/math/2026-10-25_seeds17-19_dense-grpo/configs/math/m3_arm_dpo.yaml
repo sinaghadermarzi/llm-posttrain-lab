@@ -1,0 +1,31 @@
+# Math arm DPO: offline preference optimization on the self-generated pairs
+# from m2 (run gen_pairs first). ref = pi_SFT-math (snapshot of init).
+# Sweep via configs/math/sweeps.yaml (CLI: train.beta=0.1).
+task: math
+stage: dpo
+run_name: dpo-math-beta${train.beta}
+output_dir: ${results_root}/runs/dpo_beta${train.beta}_seed${seed}
+init_from: ${paths.sft_base}
+
+data:
+  split: train                   # split of the pairs DatasetDict
+  max_samples: null
+
+train:
+  beta: 0.1
+  # Budget history (math, 9k self-generated pairs, effective batch 64):
+  #   5e-7 x 1 epoch: barely moved (KL 0.16, loss ~ln 2, every beta alike)
+  #   5e-6 x 2 epochs: pass@1 peaked at step 58 (0.57) then collapsed to 0.07-0.37
+  #     by step 116: likelihood displacement (held-out logp_chosen -32 -> -69 nats at beta 0.1)
+  # 2e-6 x 2 epochs with 10 checkpoints traces the rise, the peak and the onset
+  # of the collapse; m3_arm_dpo_nll.yaml is the same budget plus an NLL term.
+  learning_rate: 2.0e-6
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  num_train_epochs: 2
+  max_length: 1024
+  truncation_mode: keep_end
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 16  # 1 GPU per run (sweep in parallel) -> effective 64
+  save_strategy: steps
+  save_steps: 0.1                  # 10 checkpoints per run (eval traces the frontier through them)
