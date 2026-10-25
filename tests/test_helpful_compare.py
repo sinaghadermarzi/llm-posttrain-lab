@@ -108,3 +108,48 @@ def test_one_run_keeps_its_old_note(tmp_path: Path) -> None:
     _arms(tmp_path)
     out = _compare(tmp_path, "--seed", "17", "ppo_kl0.05@kl5", "dpo_beta0.3@kl5")
     assert "  ckpt2 (step 26)" in _row(out.stdout, "ppo_kl0.05@kl5 ") and "_seed17 ckpt" not in out.stdout
+
+
+def _helpful_tree(root: Path) -> None:
+    runs = {"sft-base": [(1, 0.0)], "sft": [(40, 3.0), (80, 7.5)], "ppo_kl0.02": [(13, 2.1), (26, 6.0), (39, 11.0)],
+            "ppo_kl0.1": [(13, 1.0), (26, 2.5)], "grpo_beta0.0": [(100, 2.0), (200, 5.0), (300, 12.0)],
+            "grpo_beta0.1": [(100, 0.5), (200, 1.0)], "dpo_beta0.01": [(32, 4.0), (64, 15.0)],
+            "dpo_beta0.1": [(32, 1.8), (64, 5.5)], "dpo-nll_beta0.01": [(32, 2.2), (64, 9.0)],
+            "dpo-nll_beta0.1": [(32, 1.5), (64, 4.8)]}
+    for run, steps in runs.items():
+        for step, kl in steps:
+            # the per-prompt slope grows with KL, so the checkpoints' judge spread is widest on the last prompt
+            _ckpt(root, f"{run}_seed17", step, kl, judge=kl / 5, train_rm=kl / 2, slope=kl / 100)
+
+
+def test_every_line_of_the_helpful_snapshot_spec_runs(tmp_path: Path) -> None:
+    spec = OmegaConf.to_container(OmegaConf.load(ROOT / "evidence" / "helpful" / "snapshot.yaml"))
+    root, out = tmp_path / "helpful", tmp_path / "snap"
+    _helpful_tree(root)
+    (out / "tables").mkdir(parents=True)
+    done = export_evidence.run_compares(root, spec["compare"], out)
+    failed = [(d["args"], (out / d["file"]).read_text()[-300:]) for d in done if d["status"] != "ok"]
+    assert not failed, failed
+    ten = (out / "tables" / "compare_3.txt").read_text()                  # ppo@kl10 ... sft@kl10
+    assert "ppo_kl0.02_seed17 ckpt3 (step 39)" in ten and "judge" in ten
+    assert "! -2.50 nats from 10" in _row(ten, "sft@kl10 ")                 # never reached: flagged, not dropped
+    assert "train RM" in (out / "tables" / "compare_4.txt").read_text()
+
+    examples = export_evidence.export_examples(root, spec["examples"], out)
+    assert examples["checkpoints"] == spec["examples"]["checkpoints"] and examples["prompts"] == 6
+    md = (out / "examples" / "examples.md").read_text()
+    # prompt 49 on grpo_beta0.0's last checkpoint (12 nats): judge 12/5 + 49 * 0.12, training RM 12/2 + 49 * 0.12
+    assert "widest spread of judge reward" in md and "**grpo_beta0.0@last**: judge +8.28, training RM +11.88" in md
+    first = json.loads((out / "examples" / "examples.jsonl").read_text().splitlines()[0])
+    assert first["question"] == PROMPTS[-1] and first["score_judge"] is not None   # the widest spread first
+
+
+@pytest.mark.parametrize("task", ["math", "helpful"])
+def test_snapshot_specs_only_use_known_flags(task: str) -> None:
+    spec = OmegaConf.to_container(OmegaConf.load(ROOT / "evidence" / task / "snapshot.yaml"))
+    for line in spec["compare"]:
+        words = line.split()
+        flags = [w for w in words if w.startswith("--")]
+        assert set(flags) <= {"--pool", "--seed", "--metric"} and ("--pool" in flags) != ("--seed" in flags), line
+        if "--metric" in flags:
+            assert words[words.index("--metric") + 1] in compare_math.METRICS, line

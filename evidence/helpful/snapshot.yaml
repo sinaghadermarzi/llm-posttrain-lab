@@ -1,0 +1,52 @@
+# What `make evidence TASK=helpful` exports besides the figures and tables
+# (analysis/export_evidence.py). Fixed on 2026-10-25 while the first helpful
+# run was training pi_SFT, before any helpful KL or reward existed, so neither
+# the targets nor the runs below were chosen from results. Edit only in a
+# reviewed commit BEFORE the snapshot that uses it (AGENTS.md).
+
+# analysis/compare_math.py argument lines, each saved as tables/compare_<i>.txt.
+# On helpful samples it scores each prompt by the held-out judge's mean reward
+# (Skywork-Reward-V2-Llama-3.1-8B, the headline); --metric train_rm scores the
+# same checkpoints by the training reward model the RL arms optimized. The
+# first checkpoint of a line is the baseline.
+compare:
+  # Matched KL, arm against arm. ARM@klX is each seed's checkpoint nearest X
+  # nats among ALL of that arm's runs (any beta / kl_coef), by KL alone, so
+  # these lines need no guess at how far each beta moves; the output names the
+  # run it picked and flags any checkpoint more than 0.3 nats off (not matched).
+  # Targets 2, 5 and 10 nats, log-spaced from near pi_SFT to far: helpful
+  # responses run to 512 tokens (math's ~130), so sequence KL should reach past
+  # math's 2-5 nats. A target an arm never reaches is flagged, not dropped.
+  # Baseline PPO: the PPO-vs-GRPO evidence lives on this track (README).
+  - --pool ppo@kl2 grpo@kl2 dpo@kl2 dpo-nll@kl2 sft@kl2
+  - --pool ppo@kl5 grpo@kl5 dpo@kl5 dpo-nll@kl5 sft@kl5
+  - --pool ppo@kl10 grpo@kl10 dpo@kl10 dpo-nll@kl10 sft@kl10
+  # The same checkpoints by the reward the arms were trained on: a training-RM
+  # gain the judge doesn't share is reward over-optimization.
+  - --pool --metric train_rm ppo@kl2 grpo@kl2 dpo@kl2 dpo-nll@kl2 sft@kl2
+  - --pool --metric train_rm ppo@kl5 grpo@kl5 dpo@kl5 dpo-nll@kl5 sft@kl5
+  - --pool --metric train_rm ppo@kl10 grpo@kl10 dpo@kl10 dpo-nll@kl10 sft@kl10
+  # DPO against DPO+NLL at the same beta, at the end of training (not matched
+  # KL: this is about collapse). On math, small-beta DPO collapsed through
+  # likelihood displacement and the NLL term prevented it (FINDINGS M3, M4).
+  - --pool dpo_beta0.01@last dpo-nll_beta0.01@last
+  - --pool dpo_beta0.1@last dpo-nll_beta0.1@last
+  # Unconstrained RL: GRPO beta 0 against its most constrained run at the end
+  # (not matched KL), by the judge and by the training RM: beta 0 is expected
+  # to reward-hack, a training-RM gain the judge doesn't share.
+  - --pool grpo_beta0.1@last grpo_beta0.0@last
+  - --pool --metric train_rm grpo_beta0.1@last grpo_beta0.0@last
+
+# Responses to the same prompts from these checkpoints (sample 0 each), the
+# prompts with the widest spread of judge reward first: what imitation, small-
+# beta DPO with and without NLL, PPO and unconstrained GRPO write.
+examples:
+  seed: 17
+  prompts: 6
+  checkpoints:
+    - sft-base@last          # pi_SFT, the reference
+    - sft@last               # continued imitation on the chosen responses
+    - dpo_beta0.01@last      # small-beta DPO (math: collapsed)
+    - dpo-nll_beta0.01@last  # the same beta with the NLL term
+    - ppo_kl0.02@last        # PPO with its weakest KL penalty
+    - grpo_beta0.0@last      # unconstrained GRPO (expected to reward-hack)
