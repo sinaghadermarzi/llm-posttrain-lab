@@ -1,0 +1,32 @@
+# Arm DPO+NLL (IRPO / RPO style): the DPO arm's loss plus the token-mean NLL of
+# the chosen response, weight 1. On the math track pure DPO at this budget
+# lowered the likelihood of the chosen answers along with the rejected ones and
+# collapsed at small beta (FINDINGS M3); the NLL term prevented it in every
+# seed at no cost to DPO's best (M4). Same pairs, reference, budget and beta
+# grid as arm_dpo.yaml, so the two compare directly.
+# Sweep via configs/helpful/sweeps.yaml (dpo_nll; CLI: train.beta=0.1).
+task: helpful
+stage: dpo
+run_name: dpo-nll-beta${train.beta}
+output_dir: ${results_root}/runs/dpo-nll_beta${train.beta}_seed${seed}  # arm = 'dpo-nll' (run_arm)
+init_from: ${paths.sft_base}
+
+data:
+  split: train_prefs
+  max_samples: 20000
+
+train:
+  beta: 0.1
+  loss_type: [sigmoid, sft]        # DPO + NLL on chosen (TRL 1.7 multi-loss)
+  loss_weights: [1.0, 1.0]
+  # budget: identical to arm_dpo.yaml (see its comment)
+  learning_rate: 2.0e-6
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  num_train_epochs: 1
+  max_length: 1536
+  truncation_mode: keep_end
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 16  # 1 GPU per run (sweep runs in parallel) -> effective 64
+  save_strategy: steps
+  save_steps: 0.1                  # 10 checkpoints per run

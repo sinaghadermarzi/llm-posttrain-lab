@@ -2,6 +2,8 @@
 # Each value becomes one training run -> one curve in the frontier plot.
 dpo:
   train.beta: [0.01, 0.05, 0.1, 0.3]
+dpo_nll:                 # same grid as dpo: the NLL term is the only difference
+  train.beta: [0.01, 0.05, 0.1, 0.3]
 ppo:
   train.kl_coef: [0.02, 0.05, 0.1]   # if over budget, drop 0.1 first (GRPO covers that regime)
 grpo:

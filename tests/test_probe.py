@@ -94,19 +94,22 @@ def test_the_probe_runs_the_real_pipeline_once_per_arm(repo, tmp_path: Path) -> 
     logs = sorted((root / "logs").glob("*.log"))
     launches = _launches(run.stdout + "\n" + "\n".join(p.read_text() for p in logs))
     modules = [ln.split("--module ")[1].split()[0] if "--module" in ln else ln.split()[3] for ln in launches]
-    # pi_SFT, its stop probe, RM, SFT arm, one DPO, one PPO, one GRPO, 4 eval shards, the report (DPO and the
-    # eval shards launch into their own logs, so compare as a multiset)
+    # pi_SFT, its stop probe, RM, SFT arm, one DPO, one DPO+NLL, one PPO, one GRPO, 4 eval shards, the report
+    # (DPO and the eval shards launch into their own logs, so compare as a multiset)
     assert sorted(modules) == sorted(["posttrain_lab.train.sft", "posttrain_lab.utils.chat", "posttrain_lab.train.rm",
-                                      "posttrain_lab.train.sft", "posttrain_lab.train.dpo", "posttrain_lab.train.ppo",
+                                      "posttrain_lab.train.sft", "posttrain_lab.train.dpo", "posttrain_lab.train.dpo",
+                                      "posttrain_lab.train.ppo",
                                       "posttrain_lab.train.grpo"] + ["posttrain_lab.eval.run_eval"] * 4
                                      + ["posttrain_lab.probe_report"])
     assert all("PROBE=1 " in ln for ln in launches), launches
     gate = next(ln for ln in launches if "utils.chat" in ln)
     assert gate.endswith("--probe configs/helpful/stage1_sft_base.yaml --report-only")
-    assert "train.beta=0.3" in next(ln for ln in launches if "train.dpo" in ln)
+    assert "configs/helpful/arm_dpo.yaml train.beta=0.3" in run.stdout + "\n".join(p.read_text() for p in logs)
+    assert "configs/helpful/arm_dpo_nll.yaml train.beta=0.3" in "\n".join(p.read_text() for p in logs)
     assert not old.exists()                                            # every probe starts empty
-    assert not list(repo.root.glob("logs_dpo_*.log")) and not list(repo.root.glob("logs_eval_shard*.log"))
-    assert [p.name for p in logs] == ["logs_dpo_train_beta_0_3.log"] + [f"logs_eval_shard{i}.log" for i in range(4)]
+    assert not list(repo.root.glob("logs_*.log"))
+    assert [p.name for p in logs] == ["logs_dpo_train_beta_0_3.log", "logs_dponll_train_beta_0_3.log"] \
+        + [f"logs_eval_shard{i}.log" for i in range(4)]
 
 
 def test_the_probe_wont_touch_the_real_runs_logs(repo, tmp_path: Path) -> None:
@@ -125,7 +128,8 @@ def test_the_real_launcher_still_gates_and_sweeps_every_value(repo, tmp_path: Pa
     launches = _launches(run.stdout + "\n" + logs)
     gate = next(ln for ln in launches if "utils.chat" in ln)
     assert gate.endswith("--probe configs/helpful/stage1_sft_base.yaml")   # gates: no --report-only
-    assert sum("train.dpo" in ln for ln in launches) == 4 and sum("train.grpo" in ln for ln in launches) == 4
+    assert sum("arm_dpo.yaml" in ln for ln in launches) == 4 and sum("arm_dpo_nll.yaml" in ln for ln in launches) == 4
+    assert sum("train.grpo" in ln for ln in launches) == 4
     assert sum("train.ppo" in ln for ln in launches) == 3
 
 

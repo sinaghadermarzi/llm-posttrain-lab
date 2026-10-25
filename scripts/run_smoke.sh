@@ -34,8 +34,9 @@ python -m posttrain_lab.train.rm configs/helpful/stage2_rm.yaml
 echo "=== smoke helpful 3/9: SFT arm"
 python -m posttrain_lab.train.sft configs/helpful/arm_sft.yaml
 
-echo "=== smoke helpful 4/9: DPO arm (one beta)"
+echo "=== smoke helpful 4/9: DPO and DPO+NLL arms (one beta each)"
 python -m posttrain_lab.train.dpo configs/helpful/arm_dpo.yaml train.beta=0.1
+python -m posttrain_lab.train.dpo configs/helpful/arm_dpo_nll.yaml train.beta=0.1
 
 echo "=== smoke helpful 5/9: PPO arm (one kl_coef)"
 python -m posttrain_lab.train.ppo configs/helpful/arm_ppo.yaml train.kl_coef=0.05
