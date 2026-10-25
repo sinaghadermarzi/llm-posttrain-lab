@@ -211,7 +211,9 @@ def run_compares(root: Path, lines: list[str], out: Path) -> list[dict]:
 
 def export_examples(root: Path, spec: dict, out: Path) -> dict | None:
     """examples/examples.md + .jsonl: sample 0 of each checkpoint on the same
-    questions, the ones the checkpoints disagree on first (fixed seed)."""
+    questions, the ones the checkpoints disagree on first: math, questions
+    some get right and some wrong (in a fixed random order); helpful, the
+    widest spread of judge reward across the checkpoints first."""
     import compare_math
 
     checkpoints = list(spec.get("checkpoints") or [])
@@ -235,29 +237,41 @@ def export_examples(root: Path, spec: dict, out: Path) -> dict | None:
     shared = sorted(q for q, r in rows.items() if all(ck in r for ck in names))
     if not names or not shared:
         return None
-    rng = random.Random(0)
-    disagree = [q for q in shared if len({bool(rows[q][ck].get("correct")) for ck in names}) > 1]
-    rest = [q for q in shared if q not in disagree]
-    rng.shuffle(disagree)
-    rng.shuffle(rest)
-    picked = (disagree + rest)[:n]
+    judged = all("score_judge" in rows[q][ck] for q in shared for ck in names)
+    if judged:  # helpful: no right answer, so disagreement is the judge's spread
+        def spread(q: str) -> float:
+            scores = [rows[q][ck]["score_judge"] for ck in names]
+            return max(scores) - min(scores)
+        picked = sorted(shared, key=lambda q: (-spread(q), q))[:n]
+    else:
+        rng = random.Random(0)
+        disagree = [q for q in shared if len({bool(rows[q][ck].get("correct")) for ck in names}) > 1]
+        rest = [q for q in shared if q not in disagree]
+        rng.shuffle(disagree)
+        rng.shuffle(rest)
+        picked = (disagree + rest)[:n]
 
     (out / "examples").mkdir()
     lines = [f"# Example responses (sample 0 of each checkpoint{'' if seed is None else f', seed {seed}'})", "",
-             "Questions the checkpoints disagree on come first. Exported by analysis/export_evidence.py.", ""]
+             ("Prompts with the widest spread of judge reward come first." if judged else
+              "Questions the checkpoints disagree on come first.") + " Exported by analysis/export_evidence.py.", ""]
     with (out / "examples" / "examples.jsonl").open("w") as f:
         for k, q in enumerate(picked, 1):
             lines += [f"## Q{k}", "", q.strip(), ""]
             for ck in names:
                 s = rows[q][ck]
-                mark = "correct" if s.get("correct") else "wrong"
+                if judged:
+                    mark = f"judge {s['score_judge']:+.2f}, training RM {s.get('score_train_rm', float('nan')):+.2f}"
+                else:
+                    mark = "correct" if s.get("correct") else "wrong"
                 stop = "" if s.get("finished", True) else ", hit max_new_tokens"
                 text = s["response"]
                 if len(text) > MAX_RESPONSE_CHARS:
                     text = text[:MAX_RESPONSE_CHARS] + f" [... {len(s['response']) - MAX_RESPONSE_CHARS} more chars]"
                 lines += [f"**{ck}**: {mark}{stop}", "", "```text", text, "```", ""]
                 f.write(json.dumps({"question": q, "checkpoint": ck, "prompt_id": s.get("prompt_id"),
-                                    "correct": s.get("correct"), "finished": s.get("finished"),
+                                    "correct": s.get("correct"), "score_judge": s.get("score_judge"),
+                                    "score_train_rm": s.get("score_train_rm"), "finished": s.get("finished"),
                                     "response": s["response"]}) + "\n")
     (out / "examples" / "examples.md").write_text("\n".join(lines))
     return {"seed": seed, "checkpoints": names, "prompts": len(picked)}
