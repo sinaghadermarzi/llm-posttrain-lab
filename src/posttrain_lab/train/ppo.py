@@ -32,6 +32,37 @@ from posttrain_lab.train.common import (align_eos, begin_run, init_path, load_to
 from posttrain_lab.utils.checkpoints import is_done, mark_done
 
 
+class DeepSpeedSafePPOTrainer(PPOTrainer):
+    """PPOTrainer whose checkpoints save under DeepSpeed.
+
+    TRL 1.7's PPOTrainer.save_model points self.deepspeed at the bare policy
+    and then calls transformers' Trainer.save_model, which in transformers 5.13
+    reads self.deepspeed.config as DeepSpeed's config dict: every PPO
+    checkpoint under DeepSpeed crashed with "'Qwen2Config' object has no
+    attribute 'get'" (make helpful-probe, 2026-10-25; smoke runs PPO without
+    DeepSpeed, so it never got there). Under ZeRO-2, which every config uses,
+    each rank holds the full weights, so the main process saves the policy's
+    own state dict, which is what save_model meant to write.
+    """
+
+    def save_model(self, output_dir: str | None = None, _internal_call: bool = False) -> None:
+        if not self.is_deepspeed_enabled:
+            super().save_model(output_dir, _internal_call)
+            return
+        if self.accelerator.state.deepspeed_plugin.zero_stage == 3:
+            raise NotImplementedError("PPO checkpoints under ZeRO-3 need the weights gathered first; "
+                                      "configs/accelerate uses ZeRO-2")
+        if not self.args.should_save:
+            return
+        policy = self.accelerator.unwrap_model(self.model).policy
+        backup = self.model
+        self.model = policy  # Trainer._save calls save_pretrained on self.model
+        try:
+            self._save(output_dir, state_dict=policy.state_dict())
+        finally:
+            self.model = backup
+
+
 def main() -> None:
     stage_yaml, overrides = parse_entry("helpful/arm_ppo.yaml")
     cfg = load_config(stage_yaml, overrides)
@@ -75,7 +106,7 @@ def main() -> None:
         stop_token="eos",  # the tokenizer's eos: the end-of-turn token (load_tokenizer)
         **train_kwargs(cfg, PPOConfig),
     )
-    trainer = PPOTrainer(
+    trainer = DeepSpeedSafePPOTrainer(
         args=args,
         processing_class=tokenizer,
         model=policy,

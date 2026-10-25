@@ -6,6 +6,28 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-25
 
+**Incident: the helpful probe found PPO checkpoints crashing under DeepSpeed** (PR #35).
+- `make helpful-probe` on the pod got through π_SFT, the RM, the SFT arm, DPO and DPO+NLL at full scale, and PPO
+  trained: 51.7 s per update, with four 1.5B models resident and no OOM.
+- Then PPO's first checkpoint save failed on every rank with `AttributeError: 'Qwen2Config' object has no attribute
+  'get'`.
+- **Cause:** TRL 1.7's `PPOTrainer.save_model` points `self.deepspeed` at the bare policy, then calls transformers'
+  `Trainer.save_model`. In transformers 5.13 that reads `self.deepspeed.config` as DeepSpeed's config dict.
+  - It's version drift between the pins. Smoke runs PPO in one plain process with no DeepSpeed, so it never reached
+    that branch.
+  - The other arms use the standard Trainer path, where `self.deepspeed` is the real engine, which is why math never
+    hit it.
+- **In the real run** it would have stopped the pipeline at PPO's first checkpoint: about 8 h in, after π_SFT, the
+  RM and both DPO sweeps.
+- **Fix:** `train/ppo.py` uses `DeepSpeedSafePPOTrainer`, whose `save_model` under DeepSpeed saves the policy's own
+  state dict from the main process.
+  - With ZeRO-2, which every config uses, each rank holds the full weights. It refuses under ZeRO-3 rather than
+    save partial weights.
+  - A test reproduces the crash with TRL's own `save_model` on the pinned versions, so a library upgrade that fixes
+    it will show up.
+- **`PROBE_RESUME=1 make helpful-probe`** keeps the probe tree, so a re-probe after a fix starts at PPO instead of
+  retraining the stages already DONE (about 30 min).
+
 **Incident: `make preflight` reported flash-attn as FAIL, though every run had used flash attention** (PR #34).
 - flash-attn isn't installed on the pod, and preflight only tried `import flash_attn`.
 - But transformers 5.13 falls back to `kernels-community/flash-attn2` through the `kernels` package (0.15.2 on the
