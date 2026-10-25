@@ -46,6 +46,9 @@ fails without it.
 - **Don't change a config, sweep or checkpoint cadence for one seed only.** Seeds must stay comparable.
 - **Keep the existing names:** don't rename run dirs, log names or metric keys. `status`, `reset`, `aggregate` and
   the figures parse them.
+- **Before a track's first full run, probe it at full scale:** `make helpful-probe` (`PROBE=1`,
+  `configs/probe.yaml`) runs the real launchers for a few steps per stage. The smoke test runs 0.5B on one GPU and
+  can't catch an OOM or a multi-GPU failure.
 - `make status TASK=math` is read-only and safe any time. `make reset` deletes results: dry-run it first
   (`RESET_ARGS="--dry-run"`) and never run it without the user asking.
 

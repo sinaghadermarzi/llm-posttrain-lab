@@ -121,6 +121,10 @@ make smoke        # REQUIRED first: both tracks end-to-end on Qwen2.5-0.5B,
                   # tiny slices, 1 GPU, <30 min. Gates all API/version drift,
                   # both reward paths, and every metric group.
 
+make helpful-probe  # before helpful-all: the real pipeline at full scale (1.5B, real batch sizes and
+                    # lengths, 4 GPUs, vLLM, the 8B judge), a few steps per stage, under an hour.
+                    # Catches what smoke can't: OOMs (PPO holds four 1.5B models), ZeRO-2 saves.
+                    # Run `make gpu-log` first for peak memory; results in <RESULTS_DIR>/probe/helpful
 make helpful-all  # ~2.5-3 days on 4x A100 80GB (+~15-20h for harness-everywhere)
 make math-all     # ~12-15 h on 4x A100 80GB (one seed; SEED=18 for another: "More seeds")
 ```
