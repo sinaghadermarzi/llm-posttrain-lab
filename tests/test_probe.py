@@ -179,3 +179,15 @@ def test_the_report_fails_when_a_run_did_not_finish(tmp_path: Path, capsys) -> N
     out = capsys.readouterr().out
     assert "ppo_kl0.1_seed17                   NO        1       ?     0" in out
     assert "no logger rows" in out
+
+
+def test_resume_keeps_the_probe_tree(repo, tmp_path: Path) -> None:
+    """After a fix (the first probe found PPO checkpoints crashing under DeepSpeed), PROBE_RESUME=1 keeps
+    the stages already DONE, so the probe picks up where it stopped."""
+    env = _stubs(repo, tmp_path)
+    done = tmp_path / "results" / "probe" / "helpful" / "runs" / "sft-base_seed17"
+    done.mkdir(parents=True)
+    (done / "DONE").touch()
+    run = repo.run("bash", "scripts/run_probe.sh", check=False, PROBE_RESUME="1", **env)
+    assert run.returncode == 0, run.stdout[-3000:] + run.stderr[-3000:]
+    assert "PROBE_RESUME=1: keeping" in run.stdout and (done / "DONE").exists()
