@@ -21,7 +21,7 @@ In order:
   4. with --relaunch: start the GPU logger fresh (gpu_util.csv) and
      `nohup make <task>-all > <task>-all.log` (or `make smoke`), detached
 
---stage KEY redoes one training arm (math m3a-m3d, helpful 3a-3d) and
+--stage KEY redoes one training arm (math m3a-m3d, helpful 3a-3e) and
 nothing upstream: step 1 stops only that arm's jobs and refuses while
 anything else of the track runs (driver, another arm, eval); step 2 removes
 only that arm's run dirs, including ones the config no longer names (an old
@@ -69,12 +69,13 @@ from posttrain_lab.utils.dotenv import REPO_ROOT, results_dir
 MAKE_TARGETS = {
     "math": {"math-sft-base", "math-pairs", "math-arm-sft", "math-arm-dpo", "math-arm-dpo-nll", "math-arm-grpo",
              "math-eval", "math-plots", "math-all", "math-seeds", "all"},
-    "helpful": {"sft-base", "rm", "arm-sft", "arm-dpo", "arm-ppo", "arm-grpo", "eval", "plots", "helpful-all", "all"},
+    "helpful": {"sft-base", "rm", "arm-sft", "arm-dpo", "arm-dpo-nll", "arm-ppo", "arm-grpo", "eval", "plots",
+                "helpful-all", "all"},
     "smoke": {"smoke"},
 }
 GPU_LOGGER = "nvidia-smi --query-gpu=timestamp"
 # --stage: arms whose outputs only feed eval and the figures (nothing trains from them)
-ARM_STAGES = {"math": ("m3a", "m3b", "m3c", "m3d"), "helpful": ("3a", "3b", "3c", "3d")}
+ARM_STAGES = {"math": ("m3a", "m3b", "m3c", "m3d"), "helpful": ("3a", "3b", "3c", "3d", "3e")}
 
 
 def _tasks(task: str) -> list[str]:
@@ -578,7 +579,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("task", choices=["all", *status.TRACKS])
     parser.add_argument("--smoke", action="store_true", help="reset the smoke tree (<RESULTS_DIR>/smoke/<task>)")
     parser.add_argument("--archive", action="store_true", help="rename the results dir instead of deleting it")
-    parser.add_argument("--stage", metavar="KEY", help="redo one arm only (math m3a-m3d, helpful 3a-3d): "
+    parser.add_argument("--stage", metavar="KEY", help="redo one arm only (math m3a-m3d, helpful 3a-3e): "
                         "its runs, their eval results and logs")
     parser.add_argument("--seed", type=int, metavar="N", help="with --stage (math): only training seed N's runs "
                         "of the arm (default: every seed's)")

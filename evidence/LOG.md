@@ -24,6 +24,16 @@ it leads to live in `FINDINGS.md`.
     `gpu_util.csv`.
 - **Also:** `scripts/helpful/stage3b_arm_dpo.sh` still used `mapfile`, which fails under macOS bash 3.2 (AGENTS.md).
   The math copy had been fixed; this one now matches it.
+- **A helpful DPO+NLL arm (stage `3e`), before the probe runs so it covers it** (PR #33; it reached #32's branch
+  after #32 was merged). Helpful DPO's budget (2e-6 ×
+  ~313 steps) is about the one at which math's pure DPO collapsed at small β (M3), and the NLL term prevented it
+  (M4).
+  - `configs/helpful/arm_dpo_nll.yaml` is `arm_dpo.yaml` plus TRL's `loss_type: [sigmoid, sft]`, weights 1. Same
+    pairs, reference, budget and β grid.
+  - It runs right after DPO through the same launcher (`CFG`/`SWEEP`/`TAG`, logs `logs_dponll_*`), in
+    `make arm-dpo-nll`, smoke, status and `reset --stage 3e`.
+  - Key `3e`, not `3c`, so PPO and GRPO keep their keys.
+  - Expected cost: one more 1-GPU-per-run sweep, about the DPO sweep's time, plus 40 checkpoints of eval.
 - **Checked from the configs, no change needed:**
   - every helpful arm saves the checkpoints status expects: SFT 12 (about 470 steps), DPO 10 (about 313), PPO 10 (125
     updates; TRL's PPO loop saves at the last one), GRPO 10 (1,000);

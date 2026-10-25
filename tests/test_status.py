@@ -91,8 +91,10 @@ def test_launcher_plans_follow_the_scripts() -> None:
         ("math/m3_arm_dpo.yaml", ["train.beta=0.1"]), ("math/m3_arm_dpo_nll.yaml", ["train.beta=0.1"]),
         ("math/m3_arm_grpo.yaml", ["train.beta=0.04"])]
     helpful = status.launcher_plan("helpful", True)
-    assert [ovs for _, _, ovs in helpful["steps"]] == [[], [], [], ["train.beta=0.1"], ["train.kl_coef=0.05"],
-                                                        ["train.beta=0.04"]]
+    assert [(yaml, ovs) for _, yaml, ovs in helpful["steps"]] == [
+        ("helpful/stage1_sft_base.yaml", []), ("helpful/stage2_rm.yaml", []), ("helpful/arm_sft.yaml", []),
+        ("helpful/arm_dpo.yaml", ["train.beta=0.1"]), ("helpful/arm_dpo_nll.yaml", ["train.beta=0.1"]),
+        ("helpful/arm_ppo.yaml", ["train.kl_coef=0.05"]), ("helpful/arm_grpo.yaml", ["train.beta=0.04"])]
     assert status.launcher_plan("math", False)["analysis"] == [
         "aggregate.py", "frontier_math.py", "diversity_plot.py", "retention_plot.py", "pref_logps_plot.py",
         "diagnostics.py"]

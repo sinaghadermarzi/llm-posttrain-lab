@@ -24,7 +24,7 @@ if pgrep -f "run_all_helpful.sh" >/dev/null 2>&1; then
   echo "[probe] the helpful track is running (run_all_helpful.sh): probe before launching it, not alongside" >&2
   exit 1
 fi
-for f in logs_dpo_*.log logs_eval_shard*.log; do
+for f in logs_dpo_*.log logs_dponll_*.log logs_eval_shard*.log; do
   if [ -e "$f" ]; then
     echo "[probe] $f exists: the real helpful run's logs would be overwritten (make reset TASK=helpful first)" >&2
     exit 1
@@ -37,7 +37,7 @@ if [ -e "$ROOT" ]; then
 fi
 park_logs() {
   mkdir -p "$ROOT/logs"
-  for f in logs_dpo_*.log logs_eval_shard*.log; do
+  for f in logs_dpo_*.log logs_dponll_*.log logs_eval_shard*.log; do
     if [ -e "$f" ]; then mv "$f" "$ROOT/logs/"; fi
   done
 }
