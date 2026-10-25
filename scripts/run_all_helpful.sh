@@ -26,6 +26,9 @@ bash scripts/helpful/stage3a_arm_sft.sh
 echo "=== stage 3b: DPO sweep (parallel, 1 GPU each)"
 bash scripts/helpful/stage3b_arm_dpo.sh
 
+echo "=== stage 3e: DPO+NLL sweep (parallel, 1 GPU each)"
+bash scripts/helpful/stage3e_arm_dpo_nll.sh
+
 echo "=== stage 3c: PPO sweep (sequential, full node each)"
 bash scripts/helpful/stage3c_arm_ppo.sh
 

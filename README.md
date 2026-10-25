@@ -25,7 +25,7 @@ evaluation machinery — they differ only in what "reward" means:
 |---|---|---|
 | Dataset | [`HuggingFaceH4/ultrafeedback_binarized`](https://huggingface.co/datasets/HuggingFaceH4/ultrafeedback_binarized) | [`openai/gsm8k`](https://huggingface.co/datasets/openai/gsm8k) |
 | Reward | learned preference RM (+ held-out Skywork judge for eval) | **verifiable**: exact answer match (`src/posttrain_lab/tasks/gsm8k.py`) |
-| Arms | SFT / DPO / PPO / GRPO | SFT / DPO (self-generated pairs) / GRPO |
+| Arms | SFT / DPO / DPO+NLL / PPO / GRPO | SFT / DPO / DPO+NLL (self-generated pairs) / GRPO |
 | Headline metric | judge reward vs KL | pass@1 vs KL (+ pass@8) |
 | Preference pairs | human-annotated | **self-generated**: sample 8 solutions/prompt from π_SFT-math, correct=chosen vs incorrect=rejected |
 
@@ -39,16 +39,19 @@ self-generated pairs and reuse the PPO wrapper unchanged.)
 
 ```
 helpful:  base → SFT(train_sft) → π_SFT → RM (acc-gated) → arms:
-            SFT(chosen) | DPO β∈{.01,.05,.1,.3} | PPO c∈{.02,.05,.1} | GRPO β∈{0,.01,.04,.1}
+            SFT(chosen) | DPO β∈{.01,.05,.1,.3} | DPO+NLL β∈{.01,.05,.1,.3} | PPO c∈{.02,.05,.1} | GRPO β∈{0,.01,.04,.1}
 math:     base → SFT(gold CoT) → π_SFT-math → self-gen pairs → arms:
             SFT(gold) | DPO β∈{.01,.05,.1,.3} | DPO+NLL β∈{.01,.05,.1,.3} | GRPO(verifier) β∈{0,.01,.04,.1}
 ```
 
 Each task's π_SFT is both the shared starting point of its arms and the KL
 reference for its eval; the β=0 GRPO runs trace what *unconstrained* reward
-optimization does. Math's DPO+NLL arm is the DPO arm plus the NLL of the
+optimization does. Each track's DPO+NLL arm is its DPO arm plus the NLL of the
 chosen answer (IRPO / RPO; TRL `loss_type: [sigmoid, sft]`), at the same
-budget and β grid, so the two show what that term changes.
+budget and β grid, so the two show what that term changes. On math it
+prevented pure DPO's small-β collapse (`evidence/FINDINGS.md` M3, M4); helpful
+got it before its first run (stage `3e`, run right after DPO; PPO and GRPO
+keep `3c`/`3d`).
 
 ## Evaluation — every checkpoint becomes one frontier point
 
@@ -136,7 +139,7 @@ after a crash and it continues. Per-stage targets:
 |---|---|---|
 | `make sft-base` | `make math-sft-base` | π_SFT (2–3 h / ~30 min) |
 | `make rm` | `make math-pairs` | RM (2–3 h) / self-gen pairs (~1 h) |
-| `make arm-sft arm-dpo` | `make math-arm-sft math-arm-dpo math-arm-dpo-nll` | imitation + DPO (+NLL) sweeps |
+| `make arm-sft arm-dpo arm-dpo-nll` | `make math-arm-sft math-arm-dpo math-arm-dpo-nll` | imitation + DPO (+NLL) sweeps |
 | `make arm-ppo arm-grpo` | `make math-arm-grpo` | RL sweeps (the long pole) |
 | `make eval` | `make math-eval` | sharded, incremental |
 | `make plots` | `make math-plots` | figures |
