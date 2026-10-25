@@ -4,6 +4,44 @@ Newest first. One entry per run, incident or decision, with the numbers that mat
 PR or snapshot. Times are the pod's clock. This is the "what happened, including what went wrong" record; the claims
 it leads to live in `FINDINGS.md`.
 
+## 2026-10-25
+
+**Snapshot: [`math/2026-10-25_seeds17-19_dense-grpo`](math/2026-10-25_seeds17-19_dense-grpo/)** (supersedes
+`math/2026-10-23_seeds17-19_kl-matched`; PR #31).
+- **What's new:** GRPO retrained in every seed with 10 checkpoints per run (PR #29), with `snapshot.yaml`'s GRPO
+  positions doubled to match (PR #30). All 10 comparisons ran `ok`. 396 checkpoints, 3.1 MB.
+  - The 276 SFT, DPO and DPO+NLL rows in `frontier.csv` are identical to the previous snapshot's.
+- **Exported on the pod** (ADO `edc4719`) and replayed here by `sync_llm_posttrain_lab.sh export`.
+- **What it showed:**
+  - GRPO's KL picks now land on target: 1 of 9 is more than 0.3 nats off (seed 18 at ~2 nats, 0.31), against 3 of
+    9 before. The 9 DPO-arm misses remain, from DPO's own checkpoint spacing (seed 18's β=0.3 jumps 1.48 → 4.06
+    nats).
+  - **From ~3 nats up,** all 7 matched pairs favor GRPO by 0.022–0.069, CIs excluding 0, in all three seeds.
+  - **Below ~3 nats,** seed 17 has two matched pairs with DPO β=0.3 ahead: +0.011 at ~1.9 nats (`compare_8`) and
+    +0.015 against GRPO β=0.0 at ~2.6 nats (`compare_2`). Each CI excludes 0. In `K/`, seed 17's nearest GRPO
+    checkpoint to DPO's 1.91 nats was at 2.13 nats; the new runs have one at 1.95.
+- **FINDINGS:**
+  - M2 stays `tentative`, reworded to the matched-KL gap from ~3 nats up. It now has matched pairs in every seed,
+    but no matched across-seed line. Calling it supported in the first draft was corrected in review (PR #31).
+  - M8 ("GRPO is never behind at matched KL") is `refuted`.
+  - New M11 (`tentative`): below ~3 nats the arms are within about 0.02, and which one leads varies.
+  - M9 gains the same-seed rerun noise. M5 and M6 have GRPO's numbers updated. M3, M4 and M10 are unchanged.
+
+**Run: math GRPO retrained for seeds 17–19 with 10 checkpoints per run** (PR #29). `make reset TASK=math
+RESET_ARGS="--stage m3d --archive --relaunch"` at 20:47 on 10-23, finished 16:36 on 10-24.
+- **Timings:** per seed, about 4.3 h of GRPO (4 runs of 3,550–3,640 s each, against ~3,435 s with 5 checkpoints),
+  then about 2.3 h of eval for its 40 checkpoints. The whole run took about 19.8 h; the estimate was ~16 h.
+- **Disk:** 36.5 GB per run, 438 GB in all; the estimate was 360 GB. The old runs are in `math/archive/` on the pod
+  (about 240 GB).
+- **The reruns are close to the old runs, but not identical.** Only `save_steps` changed (as-run configs).
+  - Final pass@1 moved by −0.006 to +0.011. In seeds 18–19 every run is within 0.006, and two are unchanged. Their
+    last logged training metrics (reward, its std, length) also match the old runs to four figures in 7 of 8 runs.
+  - Seed 17 drifted more: β=0.0's final KL went from 4.95 to 5.67 nats and its pass@1 rose by 0.011.
+  - Why seed 17 moved more isn't known. Its old runs predate the as-run config files, so their configs can't be
+    compared.
+  - Status flagged nothing. Final logged `clipped_ratio` was at most 0.017, and `frac_reward_zero_std` at most
+    0.61.
+
 ## 2026-10-23
 
 **Decision: checkpoint GRPO and PPO 10 times a run, as DPO, and retrain math GRPO for seeds 17–19** (PR #29).

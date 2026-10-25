@@ -1,0 +1,30 @@
+$ python analysis/compare_math.py <root> --pool grpo_beta0.0@kl5 dpo_beta0.3@kl5 dpo-nll_beta0.3@kl5
+
+pooled over seeds 17, 18, 19
+
+checkpoint                            seed prompts  pass@1   ± SE   KL k1
+grpo_beta0.0@kl5                        17    1319   0.610  0.010    4.79  ckpt7 (step 658)
+grpo_beta0.0@kl5                        18    1319   0.602  0.010    5.12  ckpt5 (step 470)
+grpo_beta0.0@kl5                        19    1319   0.607  0.010    5.16  ckpt5 (step 470)
+grpo_beta0.0@kl5                      mean           0.606  0.002   (± SE across seeds)
+dpo_beta0.3@kl5                         17    1319   0.565  0.010    4.99  ckpt7 (step 203)
+dpo_beta0.3@kl5                         18    1319   0.520  0.010    5.47  ckpt5 (step 145)  ! +0.47 nats from 5
+dpo_beta0.3@kl5                         19    1319   0.564  0.010    5.39  ckpt6 (step 174)  ! +0.39 nats from 5
+dpo_beta0.3@kl5                       mean           0.550  0.015   (± SE across seeds)
+dpo-nll_beta0.3@kl5                     17    1319   0.571  0.010    3.43  ckpt6 (step 174)  ! -1.57 nats from 5
+dpo-nll_beta0.3@kl5                     18    1319   0.533  0.010    5.08  ckpt10 (step 290)
+dpo-nll_beta0.3@kl5                     19    1319   0.531  0.010    4.83  ckpt5 (step 145)
+dpo-nll_beta0.3@kl5                   mean           0.545  0.013   (± SE across seeds)
+! klX checkpoint more than 0.3 nats from its target: the run has no nearer one, so it is not matched KL
+
+paired vs grpo_beta0.0@kl5, per seed (same prompts; ± 1.96 SE over prompts) and across seeds (mean of the per-seed differences; ± t2 SE across seeds)
+  dpo_beta0.3@kl5                    seed 17   -0.045 ± 0.006  [-0.057, -0.033]  worse  (1319 prompts)
+  dpo_beta0.3@kl5                    seed 18   -0.082 ± 0.006  [-0.094, -0.070]  worse  (1319 prompts)  ! KL +0.35 nats from the baseline: not matched
+  dpo_beta0.3@kl5                    seed 19   -0.043 ± 0.006  [-0.054, -0.032]  worse  (1319 prompts)
+  dpo_beta0.3@kl5                    prompts   -0.057 ± 0.004  [-0.064, -0.049]  (seed-mean per prompt; eval noise only)
+  dpo_beta0.3@kl5                    seeds     -0.057 ± 0.013  [-0.111, -0.002]  worse  (3 seeds, t2 = 4.30)
+  dpo-nll_beta0.3@kl5                seed 17   -0.039 ± 0.005  [-0.050, -0.029]  worse  (1319 prompts)  ! KL -1.36 nats from the baseline: not matched
+  dpo-nll_beta0.3@kl5                seed 18   -0.069 ± 0.006  [-0.080, -0.057]  worse  (1319 prompts)
+  dpo-nll_beta0.3@kl5                seed 19   -0.076 ± 0.006  [-0.088, -0.065]  worse  (1319 prompts)  ! KL -0.33 nats from the baseline: not matched
+  dpo-nll_beta0.3@kl5                prompts   -0.062 ± 0.004  [-0.069, -0.054]  (seed-mean per prompt; eval noise only)
+  dpo-nll_beta0.3@kl5                seeds     -0.062 ± 0.011  [-0.110, -0.013]  worse  (3 seeds, t2 = 4.30)

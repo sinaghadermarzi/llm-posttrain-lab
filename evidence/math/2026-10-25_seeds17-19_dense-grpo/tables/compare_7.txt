@@ -1,0 +1,29 @@
+$ python analysis/compare_math.py <root> --pool dpo_beta0.3@ckpt4 grpo_beta0.01@last grpo_beta0.0@last
+
+pooled over seeds 17, 18, 19
+
+checkpoint                            seed prompts  pass@1   ± SE   KL k1
+dpo_beta0.3@ckpt4                       17    1319   0.576  0.010    2.66
+dpo_beta0.3@ckpt4                       18    1319   0.530  0.010    4.16
+dpo_beta0.3@ckpt4                       19    1319   0.547  0.010    2.97
+dpo_beta0.3@ckpt4                     mean           0.551  0.013   (± SE across seeds)
+grpo_beta0.01@last                      17    1319   0.602  0.010    3.22
+grpo_beta0.01@last                      18    1319   0.593  0.010    3.45
+grpo_beta0.01@last                      19    1319   0.593  0.010    2.94
+grpo_beta0.01@last                    mean           0.596  0.003   (± SE across seeds)
+grpo_beta0.0@last                       17    1319   0.626  0.010    5.67
+grpo_beta0.0@last                       18    1319   0.639  0.010    7.36
+grpo_beta0.0@last                       19    1319   0.633  0.010    7.64
+grpo_beta0.0@last                     mean           0.633  0.004   (± SE across seeds)
+
+paired vs dpo_beta0.3@ckpt4, per seed (same prompts; ± 1.96 SE over prompts) and across seeds (mean of the per-seed differences; ± t2 SE across seeds)
+  grpo_beta0.01@last                 seed 17   +0.027 ± 0.005  [+0.016, +0.037]  better  (1319 prompts)  ! KL +0.56 nats from the baseline: not matched
+  grpo_beta0.01@last                 seed 18   +0.063 ± 0.006  [+0.052, +0.074]  better  (1319 prompts)  ! KL -0.71 nats from the baseline: not matched
+  grpo_beta0.01@last                 seed 19   +0.046 ± 0.005  [+0.036, +0.057]  better  (1319 prompts)
+  grpo_beta0.01@last                 prompts   +0.045 ± 0.003  [+0.039, +0.052]  (seed-mean per prompt; eval noise only)
+  grpo_beta0.01@last                 seeds     +0.045 ± 0.011  [+0.000, +0.091]  better  (3 seeds, t2 = 4.30)
+  grpo_beta0.0@last                  seed 17   +0.050 ± 0.005  [+0.040, +0.061]  better  (1319 prompts)  ! KL +3.01 nats from the baseline: not matched
+  grpo_beta0.0@last                  seed 18   +0.109 ± 0.006  [+0.097, +0.121]  better  (1319 prompts)  ! KL +3.20 nats from the baseline: not matched
+  grpo_beta0.0@last                  seed 19   +0.086 ± 0.006  [+0.074, +0.098]  better  (1319 prompts)  ! KL +4.67 nats from the baseline: not matched
+  grpo_beta0.0@last                  prompts   +0.082 ± 0.004  [+0.074, +0.089]  (seed-mean per prompt; eval noise only)
+  grpo_beta0.0@last                  seeds     +0.082 ± 0.017  [+0.008, +0.155]  better  (3 seeds, t2 = 4.30)
