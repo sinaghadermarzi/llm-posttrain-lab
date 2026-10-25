@@ -21,7 +21,8 @@ it leads to live in `FINDINGS.md`.
     +0.015 against GRPO β=0.0 at ~2.6 nats (`compare_2`). Each CI excludes 0. In `K/`, seed 17's nearest GRPO
     checkpoint to DPO's 1.91 nats was at 2.13 nats; the new runs have one at 1.95.
 - **FINDINGS:**
-  - M2 is `supported`, reworded to the matched-KL gap from ~3 nats up.
+  - M2 stays `tentative`, reworded to the matched-KL gap from ~3 nats up. It now has matched pairs in every seed,
+    but no matched across-seed line. Calling it supported in the first draft was corrected in review (PR #31).
   - M8 ("GRPO is never behind at matched KL") is `refuted`.
   - New M11 (`tentative`): below ~3 nats the arms are within about 0.02, and which one leads varies.
   - M9 gains the same-seed rerun noise. M5 and M6 have GRPO's numbers updated. M3, M4 and M10 are unchanged.

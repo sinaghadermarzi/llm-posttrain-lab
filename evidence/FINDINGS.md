@@ -63,7 +63,7 @@ History:
 
 ### M2. From ~3 nats up GRPO is ahead of DPO and DPO+NLL at matched KL, and the gap grows as the DPO arms level off
 
-Status: supported (3 seeds). Last checked: `S/`, 2026-10-25.
+Status: tentative (3 seeds). Last checked: `S/`, 2026-10-25.
 
 **Every matched pair at ~3 and ~5 nats has GRPO ahead,** by 0.022–0.069, each with a paired CI excluding 0. The 7
 pairs cover all three seeds:
@@ -77,6 +77,10 @@ pairs cover all three seeds:
 | ~5 nats | 17 | DPO β=0.3 | 4.99 vs 4.79 | −0.045 [−0.057, −0.033] |
 | ~5 nats | 18 | DPO+NLL β=0.3 | 5.08 vs 5.12 | −0.069 [−0.080, −0.057] |
 | ~5 nats | 19 | DPO β=0.3 | 5.39 vs 5.16 | −0.043 [−0.054, −0.032] |
+
+That falls short of `supported`, which needs an across-seed CI excluding 0 on matched pairs. These per-seed CIs cover
+eval sampling, not training randomness. They also mix arms and targets, and seed 18 contributes one pair. Of the
+across-seed lines, DPO's at ~3 nats includes 0, and the other three include unmatched pairs.
 
 Evidence:
 - **KL-targeted comparisons,** fixed in `snapshot.yaml` before the snapshot. Each uses every seed's checkpoint nearest
@@ -112,7 +116,9 @@ Caveats:
   5.47, between consecutive checkpoints. Its unmatched pairs (−0.072, −0.068, −0.082) point the same way but don't
   count.
 - **DPO's across-seed CI at ~3 nats includes 0.** The other three across-seed CIs exclude it, but each includes at
-  least one unmatched pair. The status rests on the matched pairs above.
+  least one unmatched pair.
+- **What would make it `supported`:** a matched across-seed comparison. That needs DPO-arm checkpoints near the
+  targets in seed 18, so denser DPO and DPO+NLL checkpoints, retrained in every seed.
 - **"Level off" is descriptive:** seed means at two targets, with no test of the slope.
 - **This is 3 seeds,** so t₂ = 4.30.
 
@@ -125,9 +131,12 @@ History:
   - Every matched pair favors GRPO: seeds 17 and 19 at ~3 nats, and seed 17 at ~5 nats.
   - A first draft of this update (PR #28) called it supported, on the strength of the across-seed CIs at ~5 nats.
     Review pointed out that those mix in unmatched pairs.
-- 2026-10-25, `S/` (GRPO with 10 checkpoints per run): supported.
+- 2026-10-25, `S/` (GRPO with 10 checkpoints per run): stays tentative, now with matched pairs in all three seeds.
   - With GRPO's picks on target, 7 matched pairs at ~3 and ~5 nats cover all three seeds, and every one favors GRPO
     by more than 0.02 with a CI excluding 0.
+  - A first draft of this update (PR #31) called it supported. Review pointed out that per-seed CIs cover eval
+    sampling only, and that no across-seed line is both matched and clear of 0. The same objection was raised on
+    PR #28.
   - Reworded from "Above ~3 nats GRPO keeps gaining while DPO and DPO+NLL level off": the matched-KL gap is what the
     comparisons test, and the levelling is descriptive.
 
