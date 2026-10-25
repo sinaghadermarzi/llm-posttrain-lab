@@ -7,7 +7,8 @@ results_root: ${results_dir:}/${task}   # RESULTS_DIR (env or .env), default res
 model:
   base: Qwen/Qwen2.5-1.5B          # escape hatch: Qwen/Qwen2.5-1.5B-Instruct (then skip stage 1)
   dtype: bfloat16
-  attn_implementation: flash_attention_2   # set to "sdpa" if flash-attn is not installed
+  attn_implementation: flash_attention_2   # no flash-attn: transformers uses kernels-community/flash-attn2 via the
+                                           # kernels package (make preflight checks); neither: set "sdpa"
 
 # Defaults so eval-only stages can call the data loaders without a data block.
 data:
