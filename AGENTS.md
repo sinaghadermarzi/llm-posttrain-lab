@@ -61,6 +61,9 @@ fails without it.
     per step differ between seeds (each seed trains on its own pairs), so the same `@ckptK` can sit at very different
     KL. A checkpoint flagged `!` is more than 0.3 nats off: not matched.
   - Only `--pool`'s across-seed line covers training randomness; per-seed CIs cover eval sampling only.
+  - **Helpful:** the same tool scores the held-out judge's reward (`--metric train_rm` for the training RM's), and
+    `ARM@klX` (e.g. `dpo@kl5`) picks the checkpoint nearest X nats across all of an arm's runs, by KL alone. The
+    0.02 tie convention is for pass@1 only; judge-reward ties go by the paired CI.
 - **Picking each arm's best checkpoint on the test prompts flatters it.** Prefer the comparisons fixed in advance in
   `evidence/<task>/snapshot.yaml`, and say so when a comparison isn't one of them.
 

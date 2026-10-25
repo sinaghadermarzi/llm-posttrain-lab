@@ -85,6 +85,15 @@ each run's best on these same prompts flatters it.
 python analysis/compare_math.py "$RESULTS_DIR/math" dpo_beta0.3@116 grpo_beta0.01@374 grpo_beta0.0@374
 ```
 
+On the helpful track the same script scores each prompt by the judge's mean
+reward (`--metric train_rm` for the training RM's), and an arm can be named at a
+KL target: `dpo@kl5` is the DPO checkpoint nearest 5 nats across all of DPO's β
+runs, picked by KL alone.
+
+```bash
+python analysis/compare_math.py "$RESULTS_DIR/helpful" --pool ppo@kl5 grpo@kl5 dpo@kl5 dpo-nll@kl5 sft@kl5
+```
+
 These CIs cover eval sampling only, for these particular trained models. How
 much a rerun with another training seed moves the numbers needs more seeds
 (see [More seeds](#more-seeds-math-track)).
