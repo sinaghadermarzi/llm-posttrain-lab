@@ -10,16 +10,20 @@
 # (FINDINGS.md M1, M2); the klX lines at the end match it in every seed. A line
 # that can't run yet (a seed not trained) records why and the export goes on.
 compare:
+  # GRPO positions doubled on 2026-10-25 (PR #30): GRPO now saves 10 checkpoints
+  # a run, not 5 (PR #29), at steps 94, 188, ..., 846, 934, so the old ckptK
+  # (steps 187, 374, 561, 748) is now ckpt2K, within 4 steps. The seed-17 KL
+  # gaps quoted below were measured on the old runs; the output gives the new ones.
   # ~2.13 nats: DPO beta 0.05 and GRPO beta 0.01 within 0.006 nats (M1)
-  - --seed 17 dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2
+  - --seed 17 dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt4
   # ~2.66 nats: no GRPO checkpoint between 2.26 and 3.05; bracket DPO beta 0.3 (M1)
-  - --seed 17 dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt2 grpo_beta0.01@ckpt3
+  - --seed 17 dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt4 grpo_beta0.01@ckpt6
   # ~3.0-3.2 nats: GRPO vs the DPO arms' checkpoints in that band (M2)
-  - --seed 17 grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
+  - --seed 17 grpo_beta0.01@ckpt6 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
   # the same checkpoint positions pooled over every seed present (across-seed CI)
-  - --pool dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt2
-  - --pool dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt2 grpo_beta0.01@ckpt3
-  - --pool grpo_beta0.01@ckpt3 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
+  - --pool dpo_beta0.05@ckpt2 grpo_beta0.01@ckpt4
+  - --pool dpo_beta0.3@ckpt4 grpo_beta0.0@ckpt4 grpo_beta0.01@ckpt6
+  - --pool grpo_beta0.01@ckpt6 dpo_beta0.3@ckpt5 dpo-nll_beta0.1@ckpt3 dpo-nll_beta0.3@ckpt5
   # best-looking points (not matched KL: GRPO sits further out; say so wherever it's used)
   - --pool dpo_beta0.3@ckpt4 grpo_beta0.01@last grpo_beta0.0@last
   # Matched KL in every seed (added 2026-10-23, after the first snapshot): the
