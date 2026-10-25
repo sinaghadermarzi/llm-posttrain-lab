@@ -6,6 +6,15 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-25
 
+**Incident: `make preflight` reported flash-attn as FAIL, though every run had used flash attention** (PR #34).
+- flash-attn isn't installed on the pod, and preflight only tried `import flash_attn`.
+- But transformers 5.13 falls back to `kernels-community/flash-attn2` through the `kernels` package (0.15.2 on the
+  pod), loaded from the offline HF cache. Checked on the pod: Qwen2.5-1.5B loaded with `flash_attention_2` resolved
+  to that kernel, and a forward pass ran.
+- So the math runs used flash attention, and the helpful runs will too.
+- Preflight now tries that fallback on a tiny model on the GPU. It reports OK with the kernel it got, and FAIL only
+  if both are missing. The `base.yaml` comment says so.
+
 **Decision: probe the helpful track at full scale before its first run** (PR #32).
 - **Why:** the helpful track has only run as the 0.5B smoke on one GPU. The math track's surprises came at full
   scale or from the launchers: the vLLM engine that couldn't start for the second checkpoint (PR #23), and DPO
