@@ -6,6 +6,22 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-25
 
+**Decision: the helpful track's comparisons, fixed before its results** (PR #36). The first full helpful run
+(`make helpful-all`) was launched today after the probe passed, and was training π_SFT when these were written: no
+helpful KL or reward existed yet.
+- **`compare_math.py` scores helpful samples** by the held-out judge's mean reward per prompt (`--metric train_rm`
+  for the training RM's), auto-detected from the samples. Math output is unchanged.
+- **`ARM@klX`** (e.g. `dpo@kl5`) picks the checkpoint nearest X nats across all of an arm's runs, by KL alone. So
+  the lines needn't guess how far each β moves, which nobody knows yet for helpful. The output names the run it
+  picked.
+- **`evidence/helpful/snapshot.yaml`:**
+  - arm against arm (PPO baseline, then GRPO, DPO, DPO+NLL, SFT) at 2, 5 and 10 nats, by judge and by training RM.
+    The targets are log-spaced and set by the design: responses run to 512 tokens, against math's ~130.
+  - DPO vs DPO+NLL at β 0.01 and 0.1, at the end of training;
+  - GRPO β=0 vs β=0.1 at the end, by judge and by training RM;
+  - examples from six checkpoints, ordered by the spread of judge reward.
+- **Open:** a tie threshold for judge reward. Until FINDINGS sets one, ties go by the paired CI.
+
 **Incident: the helpful probe found PPO checkpoints crashing under DeepSpeed** (PR #35).
 - `make helpful-probe` on the pod got through π_SFT, the RM, the SFT arm, DPO and DPO+NLL at full scale, and PPO
   trained: 51.7 s per update, with four 1.5B models resident and no OOM.
