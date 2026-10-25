@@ -1,0 +1,36 @@
+# Shared task-agnostic settings. Merge order:
+#   base.yaml -> tasks/<task>.yaml -> stage yaml -> smoke.yaml (--smoke) -> CLI dotlist
+seed: 17
+task: helpful
+results_root: ${results_dir:}/${task}   # RESULTS_DIR (env or .env), default results/
+
+model:
+  base: Qwen/Qwen2.5-1.5B          # escape hatch: Qwen/Qwen2.5-1.5B-Instruct (then skip stage 1)
+  dtype: bfloat16
+  attn_implementation: flash_attention_2   # set to "sdpa" if flash-attn is not installed
+
+# Defaults so eval-only stages can call the data loaders without a data block.
+data:
+  split: null
+  max_samples: null
+
+# Canonical artifact locations consumed by later stages.
+paths:
+  sft_base: ${results_root}/runs/sft-base_seed${seed}
+  reward_model: ${results_root}/runs/rm_seed${seed}
+
+# Defaults forwarded into every TRL *Config (TrainingArguments subclass).
+train:
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_only_model: true            # weight-only checkpoints (~3GB each at 1.5B)
+  save_total_limit: null
+  report_to: mlflow
+  remove_unused_columns: false
+
+# Training metrics via HF/TRL's MLflowCallback; eval metrics are attached to
+# the same run as eval/<key> at each checkpoint's step (utils/logging.py).
+mlflow:
+  experiment: llm-posttrain-lab-${task}
+  tracking_uri: null               # null = use MLFLOW_TRACKING_URI from the pod env
