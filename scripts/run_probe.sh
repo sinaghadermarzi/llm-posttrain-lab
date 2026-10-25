@@ -5,9 +5,10 @@
 # GPU-days go in: OOMs at 1.5B with the real batch sizes and lengths (PPO holds
 # four models), saves under ZeRO-2, the 8B judge next to vLLM. Under an hour.
 #
-#   make helpful-probe          (start a GPU logger first, make gpu-log, for peak memory)
+#   make helpful-probe                  (start a GPU logger first, make gpu-log, for peak memory)
+#   PROBE_RESUME=1 make helpful-probe   after a fix: keep the probe tree, so stages already DONE are skipped
 #
-# Starts from an empty probe tree every time. The stage scripts log into the repo
+# Otherwise starts from an empty probe tree. The stage scripts log into the repo
 # root under the real run's log names, so the probe moves its logs into the probe
 # tree when it ends (and refuses to start if the real run's logs are there).
 set -euo pipefail
@@ -31,7 +32,9 @@ for f in logs_dpo_*.log logs_dponll_*.log logs_eval_shard*.log; do
   fi
 done
 
-if [ -e "$ROOT" ]; then
+if [ "${PROBE_RESUME:-}" = 1 ]; then
+  echo "[probe] PROBE_RESUME=1: keeping $ROOT, stages already DONE are skipped"
+elif [ -e "$ROOT" ]; then
   echo "[probe] removing the previous probe tree $ROOT"
   rm -rf "$ROOT"
 fi
