@@ -1,5 +1,5 @@
 .PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke evidence \
-	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-all \
+	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-probe helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-dpo-nll math-arm-grpo math-eval math-plots math-all \
 	math-seeds
 
@@ -90,6 +90,11 @@ plots:
 	python analysis/diversity_plot.py "$(HELPFUL_RESULTS)"
 	python analysis/retention_plot.py "$(HELPFUL_RESULTS)"
 	python analysis/pref_logps_plot.py "$(HELPFUL_RESULTS)"
+
+# the real helpful pipeline at full scale for a few steps per stage, under
+# <RESULTS_DIR>/probe/helpful (configs/probe.yaml): run before helpful-all
+helpful-probe:
+	bash scripts/run_probe.sh
 
 helpful-all:
 	bash scripts/run_all_helpful.sh

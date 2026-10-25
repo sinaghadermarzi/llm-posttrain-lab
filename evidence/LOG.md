@@ -6,6 +6,30 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-25
 
+**Decision: probe the helpful track at full scale before its first run** (PR #32).
+- **Why:** the helpful track has only run as the 0.5B smoke on one GPU. The math track's surprises came at full
+  scale or from the launchers: the vLLM engine that couldn't start for the second checkpoint (PR #23), and DPO
+  budgets that barely moved or collapsed (PRs #17, #18).
+  - Untested at scale: PPO holds four 1.5B models at 512-token responses, which the README flags as the OOM
+    hotspot. Helpful GRPO runs its reward model next to vLLM, DPO runs at 1536 tokens on one GPU, the 8B judge runs
+    in eval, and every multi-GPU launcher is involved.
+  - An OOM in PPO would surface about 8 h into a ~3-day run, after π_SFT, the RM and the DPO sweep.
+- **`make helpful-probe`** (`PROBE=1`, `configs/probe.yaml`, `scripts/run_probe.sh`): `run_all_helpful.sh` at full
+  scale for 4 optimizer steps per stage, with 2 checkpoints saved per run, under `<RESULTS_DIR>/probe/helpful`.
+  - It keeps the real model, attention, per-device batch sizes, accumulation, lengths, vLLM, judge and launchers.
+  - Each sweep runs only its most memory-hungry value (the last one; GRPO β=0.0 loads no reference model).
+  - The stop-probe gate only reports, since 4 steps can't learn to stop. Rollouts then run to full length: the
+    worst case for memory.
+  - It ends with `probe_report`: seconds per step, checkpoints and DONE per run, eval rows, and peak GPU memory from
+    `gpu_util.csv`.
+- **Also:** `scripts/helpful/stage3b_arm_dpo.sh` still used `mapfile`, which fails under macOS bash 3.2 (AGENTS.md).
+  The math copy had been fixed; this one now matches it.
+- **Checked from the configs, no change needed:**
+  - every helpful arm saves the checkpoints status expects: SFT 12 (about 470 steps), DPO 10 (about 313), PPO 10 (125
+    updates; TRL's PPO loop saves at the last one), GRPO 10 (1,000);
+  - the figures use `kl_k1`;
+  - eval frees the GPU between checkpoints (PR #23 is shared code).
+
 **Snapshot: [`math/2026-10-25_seeds17-19_dense-grpo`](math/2026-10-25_seeds17-19_dense-grpo/)** (supersedes
 `math/2026-10-23_seeds17-19_kl-matched`; PR #31).
 - **What's new:** GRPO retrained in every seed with 10 checkpoints per run (PR #29), with `snapshot.yaml`'s GRPO
