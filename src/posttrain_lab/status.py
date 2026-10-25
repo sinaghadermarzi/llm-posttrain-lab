@@ -91,6 +91,9 @@ TRACKS: dict[str, dict] = {
             Stage("2", "reward model (accuracy gate)", "rm", "helpful/stage2_rm.yaml"),
             Stage("3a", "SFT arm", "train", "helpful/arm_sft.yaml"),
             Stage("3b", "DPO sweep", "train", "helpful/arm_dpo.yaml", "dpo", "logs_dpo_{ov}.log", "1 each"),
+            # key 3e, run right after DPO: PPO and GRPO keep their keys (reset --stage 3c/3d)
+            Stage("3e", "DPO+NLL sweep", "train", "helpful/arm_dpo_nll.yaml", "dpo_nll", "logs_dponll_{ov}.log",
+                  "1 each"),
             Stage("3c", "PPO sweep", "train", "helpful/arm_ppo.yaml", "ppo"),
             Stage("3d", "GRPO sweep", "train", "helpful/arm_grpo.yaml", "grpo"),
             Stage("4", "eval", "eval", log="logs_eval_shard{i}.log", gpus="1 each"),
@@ -839,7 +842,7 @@ def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, 
         if run.expected_checkpoints and run.checkpoints < run.expected_checkpoints and not cfg.get("smoke"):
             # trained under an older save_steps: its frontier has fewer points than the runs it is compared with
             redo = (f' (make reset TASK={cfg.task} RESET_ARGS="--stage {stage.key} --dry-run", then without '
-                    "--dry-run)") if re.fullmatch(r"m?3[a-d]", stage.key) else ""
+                    "--dry-run)") if re.fullmatch(r"m3[a-d]|3[a-e]", stage.key) else ""
             run.warnings.append(f"finished with {run.checkpoints} of the {run.expected_checkpoints} checkpoints its "
                                 f"config now saves (trained under an older save_steps?): retrain it{redo}")
     elif job is not None:

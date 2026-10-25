@@ -1,5 +1,5 @@
 .PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke evidence \
-	sft-base rm arm-sft arm-dpo arm-ppo arm-grpo eval plots helpful-probe helpful-all \
+	sft-base rm arm-sft arm-dpo arm-dpo-nll arm-ppo arm-grpo eval plots helpful-probe helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-dpo-nll math-arm-grpo math-eval math-plots math-all \
 	math-seeds
 
@@ -73,6 +73,9 @@ arm-sft:
 
 arm-dpo:
 	bash scripts/helpful/stage3b_arm_dpo.sh
+
+arm-dpo-nll:
+	bash scripts/helpful/stage3e_arm_dpo_nll.sh
 
 arm-ppo:
 	bash scripts/helpful/stage3c_arm_ppo.sh
