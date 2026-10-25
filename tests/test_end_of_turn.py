@@ -218,7 +218,8 @@ def test_launchers_gate_on_the_base_sft(script: str) -> None:
     gate = text.index(f'python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed{seed}"')
     assert sft < gate < text.index("=== ", sft)  # right after pi_SFT, before the next stage
     yaml = "configs/helpful/stage1_sft_base.yaml" if "helpful" in script else "configs/math/m1_sft_gold.yaml"
-    assert text[gate:].splitlines()[0].endswith(f"--probe {yaml}")  # and it measures, not only reads config
+    line = text[gate:].splitlines()[0].removesuffix(" $REPORT_ONLY")  # set only under PROBE=1 (test_probe.py)
+    assert line.endswith(f"--probe {yaml}")  # and it measures, not only reads config
 
 
 

@@ -411,7 +411,7 @@ def relaunch(task: str, smoke: bool, seeds: list[int] | None = None) -> list[str
     argv, log = (["make", "smoke"], "smoke.log") if smoke else make_command(task, seeds)
     if task == "all" and not smoke:
         argv, log = ["make", "all"], "all.log"
-    env = {k: v for k, v in os.environ.items() if k not in ("SMOKE", "SEED", "SEEDS")}
+    env = {k: v for k, v in os.environ.items() if k not in ("SMOKE", "PROBE", "SEED", "SEEDS")}
     with (REPO_ROOT / log).open("w") as out:
         p = subprocess.Popen(argv, cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, start_new_session=True, env=env)

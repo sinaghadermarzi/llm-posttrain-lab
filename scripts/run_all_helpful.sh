@@ -8,11 +8,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ROOT=$(python -m posttrain_lab.config --results-root helpful)  # RESULTS_DIR-aware
+# PROBE=1 (scripts/run_probe.sh): 4 steps of pi_SFT can't learn to stop, so report the stop probe without gating
+REPORT_ONLY=""
+if [ "${PROBE:-}" = 1 ]; then REPORT_ONLY="--report-only"; fi
 
 echo "=== stage 1: pi_SFT"
 bash scripts/helpful/stage1_sft_base.sh
 # stop before the RL arms if generation would not stop at end of turn
-python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17" --probe configs/helpful/stage1_sft_base.yaml
+python -m posttrain_lab.utils.chat "$ROOT/runs/sft-base_seed17" --probe configs/helpful/stage1_sft_base.yaml $REPORT_ONLY
 
 echo "=== stage 2: reward model (gated on pairwise accuracy)"
 bash scripts/helpful/stage2_rm.sh

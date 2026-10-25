@@ -1,6 +1,7 @@
 """Config loading with a task dimension. Resolution order::
 
-    base.yaml -> configs/tasks/<task>.yaml -> <stage yaml> -> smoke.yaml (--smoke) -> CLI dotlist
+    base.yaml -> configs/tasks/<task>.yaml -> <stage yaml> -> smoke.yaml (--smoke) | probe.yaml (PROBE=1)
+              -> CLI dotlist
 
 Every entry point calls::
 
@@ -10,7 +11,9 @@ The task is read in a pre-pass from the stage yaml's ``task:`` key (a
 ``task=`` dotlist arg wins), then the full merge runs. CLI args are OmegaConf
 dotlist overrides (``train.beta=0.05``). The special flag ``--smoke`` (or env
 ``SMOKE=1``) merges configs/smoke.yaml, shrinking every stage of either task
-to a minutes-scale run.
+to a minutes-scale run. Env ``PROBE=1`` merges configs/probe.yaml instead: full
+scale (model, batch sizes, lengths), a few steps per stage, under
+<RESULTS_DIR>/probe/<task> (scripts/run_probe.sh).
 """
 
 from __future__ import annotations
@@ -36,6 +39,9 @@ def load_config(stage_yaml: str | Path, argv: list[str] | None = None) -> DictCo
     if "--smoke" in argv:
         smoke = True
         argv.remove("--smoke")
+    probe = is_probe()
+    if smoke and probe:
+        raise ValueError("SMOKE=1 and PROBE=1 together: smoke shrinks the model, the probe keeps it full size")
 
     stage_path = Path(stage_yaml)
     if not stage_path.exists():
@@ -55,10 +61,17 @@ def load_config(stage_yaml: str | Path, argv: list[str] | None = None) -> DictCo
     )
     if smoke:
         cfg = OmegaConf.merge(cfg, OmegaConf.load(CONFIG_DIR / "smoke.yaml"))
+    if probe:
+        cfg = OmegaConf.merge(cfg, OmegaConf.load(CONFIG_DIR / "probe.yaml"))
     if argv:
         cfg = OmegaConf.merge(cfg, OmegaConf.from_dotlist(argv))
     OmegaConf.resolve(cfg)
     return cfg
+
+
+def is_probe() -> bool:
+    """PROBE=1: a scale probe (configs/probe.yaml, scripts/run_probe.sh)."""
+    return os.environ.get("PROBE", "") == "1"
 
 
 def seed_everything(seed: int) -> None:
@@ -109,7 +122,7 @@ def train_kwargs(cfg: DictConfig, config_cls) -> dict:
 
 
 def results_root(task: str) -> str:
-    """A task's resolved results_root (RESULTS_DIR, and smoke/ under SMOKE=1)."""
+    """A task's resolved results_root (RESULTS_DIR, and smoke/ under SMOKE=1, probe/ under PROBE=1)."""
     return str(load_config("eval.yaml", [f"task={task}"]).results_root)
 
 
@@ -117,6 +130,8 @@ def _cli() -> None:
     """Used by scripts/ and the Makefile:
 
     python -m posttrain_lab.config helpful dpo          sweep override values, one per line
+                                                        (PROBE=1: only the last, the most memory-hungry:
+                                                        GRPO beta 0.0 loads no reference model)
     python -m posttrain_lab.config --results-root math  the task's results_root
     """
     import argparse
@@ -133,7 +148,7 @@ def _cli() -> None:
         parser.error("stage is required (or pass --results-root)")
     sweeps = OmegaConf.load(CONFIG_DIR / args.task / "sweeps.yaml")[args.stage]
     for key, values in sweeps.items():
-        for value in values:
+        for value in (list(values)[-1:] if is_probe() else values):
             print(f"{key}={value}")
 
 

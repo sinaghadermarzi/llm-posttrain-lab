@@ -8,7 +8,9 @@ cd "$(dirname "$0")/../.."
 NGPU="${NGPU:-4}"
 PORT_BASE="${PORT_BASE:-29500}"   # each run gets its own rendezvous port
 
-mapfile -t OVERRIDES < <(python -m posttrain_lab.config helpful dpo)
+OVERRIDES=()  # (a read loop, not mapfile: also runs under macOS bash 3.2, e.g. the tests)
+while IFS= read -r ov; do OVERRIDES+=("$ov"); done < <(python -m posttrain_lab.config helpful dpo)
+(( ${#OVERRIDES[@]} )) || { echo "[dpo] no sweep values for dpo" >&2; exit 1; }
 pids=(); names=(); failed=()
 reap() {  # wait on each launched run individually; a bare `wait` always returns 0
   for k in "${!pids[@]}"; do

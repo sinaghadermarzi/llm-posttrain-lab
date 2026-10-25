@@ -1,0 +1,31 @@
+# Global override for a scale probe (PROBE=1 / make helpful-probe): the real
+# pipeline at full scale for a few steps per stage, before committing GPU-days.
+# Unlike smoke.yaml it keeps the real model, attention, per-device batch sizes,
+# gradient accumulation, sequence and completion lengths, vLLM, the 8B judge
+# and the multi-GPU launchers, so what fails here (OOM, a launcher, a save
+# under ZeRO-2, the judge next to vLLM) would fail in the real run, hours in.
+# Each sweep runs one value, the most memory-hungry (config.py: the last one;
+# GRPO beta 0.0 skips the reference model). Target: under an hour on 4 GPUs.
+probe: true
+results_root: ${results_dir:}/probe/${task}
+
+data:
+  max_samples: 512               # 4 optimizer steps at the largest effective batch (128)
+
+train:
+  max_steps: 4
+  save_strategy: steps
+  save_steps: 2                  # two checkpoints per run: saving under ZeRO-2 is exercised too
+  total_episodes: 256            # PPO: 4 batches of 64
+  report_to: none
+
+eval:
+  num_prompts: 16                # full max_new_tokens, vLLM and the real judge; few prompts
+  retention:
+    max_tokens: 20000
+  harness:
+    limit: 16
+  pref_logps:
+    num_pairs: 32
+
+min_accuracy: 0.0                # an RM trained for 4 steps can't pass the real gate
