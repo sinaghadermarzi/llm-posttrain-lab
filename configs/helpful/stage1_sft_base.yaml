@@ -19,3 +19,10 @@ train:
   gradient_accumulation_steps: 4   # x4 GPUs -> effective 128
   packing: true
   save_strategy: epoch             # only the final pi_SFT matters; arms checkpoint densely instead
+
+# The stop probe's gate (utils/chat.py; run_all_helpful.sh checks it right after this stage). Math's 0.8 fits
+# answers that end at one point ('#### N'); open-ended chat answers have no single right place to stop. The
+# first helpful pi_SFT scored 0.74, and sampling showed it stops: 82% of 512 samples ended their turn within the
+# 512-token cap, and only 1 of the 94 cut off started an invented turn; the rest were long answers (LOG
+# 2026-10-25). 0.5 still fails the failure the gate exists for: an untrained <|im_end|> gave 0.12 on math.
+stop_probe_min_p: 0.5
