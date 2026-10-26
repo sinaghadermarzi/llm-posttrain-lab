@@ -6,6 +6,31 @@ it leads to live in `FINDINGS.md`.
 
 ## 2026-10-25
 
+**Run: the first full helpful run stopped at π_SFT's stop gate; the gate is now 0.5 for helpful** (PR #37).
+- `make helpful-all` trained π_SFT (107 steps: one packed epoch of `train_sft`, 19:20). The stop probe gave
+  P(`<|im_end|>`) where training answers end = **0.736** (min 0.001), under the 0.8 gate, so the driver stopped
+  before the RM, as designed.
+- **Is π_SFT failing to stop, or is the probe miscalibrated for chat?** The probe reads one position: the end of a
+  training answer. Math answers end at one point (`#### N`; its π_SFTs reached 0.985). Open-ended answers have no
+  single right place to stop, and some UltraFeedback answers are themselves cut off.
+- **Sampled on the pod** with eval's sampler and settings (128 `test_prefs` prompts × 4, T=1, 512-token cap):
+  - **81.6%** of 512 samples ended their turn; 18% (94) hit the cap. The median stopped answer was 592 chars, the
+    median cut-off one 2,408 (the cap).
+  - Only **1 of the 94** cut-offs started an invented turn. The rest were long answers cut mid-content: code,
+    numbered steps, explanations.
+  - So π_SFT has learned to stop. The failure the gate exists for (math's untrained `<|im_end|>`: 0.12, every
+    sample running on) isn't happening.
+- **Decision:** keep the 512-token cap, the design shared by both tracks. The helpful gate is now 0.5:
+  `stop_probe_min_p` in `configs/helpful/stage1_sft_base.yaml`, which `utils/chat.py` reads per stage. Math stays
+  at 0.8.
+  - Raising the cap to 1024 was weighed: it would nearly double GRPO, already the long pole, and need a new PPO
+    memory probe.
+- **Known limitation for the helpful results:** about 18% of π_SFT's eval answers are truncated at 512 tokens. Every
+  arm has the same cap, but an arm that learns shorter answers will finish more often: a length effect to keep in
+  mind for judge-reward comparisons.
+- **Resume:** `nohup make helpful-all >> helpful-all.log 2>&1 &`. π_SFT is kept, and the gate is re-checked against
+  the new threshold.
+
 **Decision: the helpful track's comparisons, fixed before its results** (PR #36). The first full helpful run
 (`make helpful-all`) was launched today after the probe passed, and was training π_SFT when these were written: no
 helpful KL or reward existed yet.
