@@ -133,6 +133,16 @@ PROBE_FILE = "stop_probe.json"
 PROBE_MIN_P = 0.8
 
 
+def probe_min_p(stage_yaml: str) -> float:
+    """The gate for a stage's stop probe: its config's stop_probe_min_p, else
+    PROBE_MIN_P. Math answers end at one unambiguous point ('#### N'), so a
+    model that has learned to stop puts ~0.98 there; open-ended chat answers
+    have no single right place to stop (configs/helpful/stage1_sft_base.yaml)."""
+    from posttrain_lab.config import load_config
+
+    return float(load_config(stage_yaml, []).get("stop_probe_min_p", PROBE_MIN_P))
+
+
 def probe_conversations(stage_yaml: str, n: int = 64) -> list[list[dict]]:
     """The first n training conversations of a stage (ending in an assistant
     turn): what pi_SFT was just trained to end."""
@@ -185,15 +195,19 @@ def _cli(argv: list[str]) -> int:
     nonzero if any saved run (its tokenizer + generation_config) would not
     stop at end of turn. --probe also measures it (end_of_turn_probe) on the
     stage's training conversations, writes RUN_DIR/stop_probe.json, and fails
-    below --min-p unless --report-only (smoke: a few steps cannot learn it)."""
+    below --min-p (default: the stage's stop_probe_min_p, else PROBE_MIN_P) unless
+    --report-only (smoke: a few steps cannot learn it)."""
     import argparse
 
     ap = argparse.ArgumentParser(prog="python -m posttrain_lab.utils.chat")
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--probe", metavar="STAGE_YAML", help="measure P(end of turn) on this stage's training data")
-    ap.add_argument("--min-p", type=float, default=PROBE_MIN_P)
+    ap.add_argument("--min-p", type=float, default=None,
+                    help=f"gate (default: the stage yaml's stop_probe_min_p, else {PROBE_MIN_P})")
     ap.add_argument("--report-only", action="store_true", help="print the probe, never fail on it")
     args = ap.parse_args(argv)
+    if args.min_p is None:
+        args.min_p = probe_min_p(args.probe) if args.probe else PROBE_MIN_P
     conversations = None
     bad = 0
     for arg in args.runs:
