@@ -384,3 +384,30 @@ class SimpleModel:
 def test_sft_reinitializes_before_aligning_eos() -> None:
     text = (Path(__file__).resolve().parents[1] / "src" / "posttrain_lab" / "train" / "sft.py").read_text()
     assert text.index("init_untrained_chat_tokens(model") < text.index("align_eos(model")
+
+
+# --- the gate per stage: open-ended chat answers (2026-10-25) ----------------
+
+
+def test_each_stage_sets_its_own_gate() -> None:
+    """Math answers end at '#### N'; helpful answers are open-ended. The first helpful pi_SFT scored 0.74 and
+    stopped in sampling (82% within the 512-token cap, 1 of 94 cut-offs an invented turn): its gate is 0.5,
+    still far above an untrained <|im_end|> (0.12)."""
+    assert chat.probe_min_p("helpful/stage1_sft_base.yaml") == 0.5
+    assert chat.probe_min_p("math/m1_sft_gold.yaml") == chat.PROBE_MIN_P == 0.8
+
+
+@pytest.mark.parametrize("stage, flags, code, gate", [
+    ("helpful/stage1_sft_base.yaml", [], 0, 0.5),           # the first helpful pi_SFT passes its stage's gate
+    ("math/m1_sft_gold.yaml", [], 1, 0.8),                  # the same model fails math's
+    ("helpful/stage1_sft_base.yaml", ["--min-p", "0.9"], 1, 0.9),   # an explicit --min-p still wins
+])
+def test_the_probe_gates_on_its_stages_threshold(monkeypatch, tmp_path: Path, capsys, stage, flags, code,
+                                                 gate) -> None:
+    ckpt = save_checkpoint(tmp_path / "ckpt", [IM_END, ENDOFTEXT], fixed=True)
+    serve_tokenizer(monkeypatch, fixed=True)
+    serve_model(monkeypatch, 0.74)
+    monkeypatch.setattr(chat, "probe_conversations", lambda stage_yaml, n=64: CONVERSATIONS)
+    assert chat._cli([str(ckpt), "--probe", stage, *flags]) == code
+    assert json.loads((ckpt / chat.PROBE_FILE).read_text())["min_p"] == gate   # status reads the gate from here
+    assert f"need >= {gate}" in capsys.readouterr().out
