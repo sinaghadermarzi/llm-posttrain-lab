@@ -225,7 +225,7 @@ keep everything upstream and reset just that stage:
 make reset TASK=math RESET_ARGS="--stage m3b --archive --relaunch"
 ```
 
-`--stage` takes an arm (math `m3a`–`m3d`, helpful `3a`–`3d`). It removes
+`--stage` takes an arm (math `m3a`–`m3d`, helpful `3a`–`3e`). It removes
 only that arm's run dirs, their eval results and their per-run logs. That
 includes old runs of the arm the config no longer names, such as a previous
 sweep grid or seed. **By default it clears the arm for every seed**: once an
@@ -416,6 +416,8 @@ configs/
   tasks/{helpful,math}.yaml   per-task datasets, graders, metric groups
   helpful/  math/         per-task stage configs + sweeps.yaml
   eval.yaml smoke.yaml    global eval knobs; global tiny-mode override
+  probe.yaml              full-scale few-steps override (make helpful-probe)
+  accelerate/             accelerate launch configs (single GPU, DDP 4 GPU, ZeRO-2 1/4 GPU)
 src/posttrain_lab/
   data.py                 loaders dispatching on dataset.format (ultrafeedback | gsm8k | pairs_disk)
   tasks/gsm8k.py          THE verifier (extraction, correctness, TRL reward_funcs)
@@ -425,10 +427,12 @@ src/posttrain_lab/
   train/                  thin TRL wrappers (the swappable layer for future verl/OpenRLHF)
   eval/                   run_eval group engine; kl, reward_score, passk, retention, diversity, pref_logps
 analysis/                 aggregate → frontier.csv + frontier_seeds.csv (seed means); export_evidence (make evidence); frontier, frontier_math, retention, diversity, pref_logps, diagnostics
-scripts/{helpful,math}/   per-stage launchers; run_all_{helpful,math}.sh; run_smoke.sh
+scripts/{helpful,math}/   per-stage launchers; run_all_{helpful,math}.sh; run_smoke.sh; run_probe.sh (make helpful-probe)
 scripts/prefetch_assets.py  fill an HF_HOME for the offline cluster
+notebooks/onboarding.ipynb  first-time node checks, one section each (the headless version is make preflight)
 tests/                    python -m pytest tests/ (CPU; the download test skips without internet)
 evidence/                 git-tracked findings: FINDINGS.md, LOG.md, snapshots (make evidence)
+notes/                    the original brief for the study (prompts.md + screenshots)
 AGENTS.md                 conventions for agents and contributors (CLAUDE.md imports it)
 ```
 
