@@ -77,3 +77,16 @@ def test_a_task_without_a_snapshot_is_skipped_not_an_error(viewer, tmp_path: Pat
     monkeypatch.setattr(viewer, "EVIDENCE", tmp_path)
     assert viewer.main(["helpful"]) == 0
     assert "no snapshot" in capsys.readouterr().err
+
+
+def test_frontier_lines_follow_training_order_not_kl_order(viewer, tmp_path: Path) -> None:
+    """A run whose KL falls between two checkpoints (DPO+NLL beta 0.1 in the math snapshot) is drawn in
+    checkpoint order, as frontier_plot.py draws it, not sorted by KL (Codex on PR #38)."""
+    rows = [{"arm": "dpo-nll", "hyperparam": "beta0.1", "seed": "17", "ckpt_index": str(i), "step": str(29 * i),
+             "kl_k1": str(kl), "pass1": str(p)} for i, (kl, p) in enumerate([(1.0, 0.45), (9.5, 0.52), (8.9, 0.54),
+                                                                              (10.2, 0.53)], start=1)]
+    svg = viewer.frontier_svg(rows, "pass1", "pass@1")
+    points = re.search(r'<polyline points="([^"]+)"', svg)[1].split()
+    xs = [float(pt.split(",")[0]) for pt in points]
+    order = [sorted(xs).index(x) for x in xs]
+    assert order == [0, 2, 1, 3], "the line must go 1.0 -> 9.5 -> 8.9 -> 10.2 nats, i.e. back and forth"

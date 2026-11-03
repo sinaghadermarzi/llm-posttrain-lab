@@ -132,8 +132,10 @@ def frontier_svg(rows: list[dict[str, str]], metric: str, ylabel: str) -> str:
             means: dict[str, list[dict[str, str]]] = {}
             for r in rrows:
                 means.setdefault(r.get("ckpt_index", r.get("step", "")), []).append(r)
-            line = sorted(((sum(float(x["kl_k1"]) for x in g) / len(g), sum(float(x[metric]) for x in g) / len(g))
-                           for g in means.values()))
+            # join the positions in training order (ckpt_index, else step), as frontier_plot.py
+            # does: a run whose KL falls between checkpoints must not be traversed backwards
+            line = [(sum(float(x["kl_k1"]) for x in g) / len(g), sum(float(x[metric]) for x in g) / len(g))
+                    for _, g in sorted(means.items(), key=lambda kv: float(kv[0] or 0))]
             if len(line) > 1:
                 d = " ".join(f"{sx(symlog(x)):.1f},{sy(y):.1f}" for x, y in line)
                 out.append(f'<polyline points="{d}" fill="none" stroke="{color}" stroke-width="1.5" opacity="0.7"/>')

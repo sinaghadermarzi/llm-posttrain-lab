@@ -554,3 +554,37 @@ def test_a_run_trained_under_an_older_cadence_is_flagged(repo, tmp_path: Path) -
     assert f"m3d {old.name}: finished with 5 of the 10 checkpoints" in attention
     assert 'make reset TASK=math RESET_ARGS="--stage m3d --dry-run"' in attention
     assert new.name not in attention
+
+
+def test_a_jobs_stdout_counts_as_its_log_only_if_the_file_still_exists(tmp_path: Path) -> None:
+    """On Linux, /proc/<pid>/fd/1 of a job whose stdout is a deleted temp file (pytest's capture, a
+    removed log) reads '/tmp/x (deleted)'. That used to win over the run's own sweep log, so a running
+    sweep job showed no progress in CI (test_running_job_is_detected). A tty or pipe is not a log either."""
+    import sys
+    import tempfile
+
+    from posttrain_lab.status import _proc_stdout
+
+    if not Path("/proc").is_dir():
+        pytest.skip("/proc only")
+    with tempfile.TemporaryFile() as deleted:
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdout=deleted)
+        try:
+            assert _proc_stdout(p.pid) is None
+        finally:
+            p.kill()
+            p.wait()
+    log = tmp_path / "job.log"
+    with log.open("w") as f:
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdout=f)
+        try:
+            assert _proc_stdout(p.pid) == str(log)
+        finally:
+            p.kill()
+            p.wait()
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdout=subprocess.PIPE)
+    try:
+        assert _proc_stdout(p.pid) is None
+    finally:
+        p.kill()
+        p.wait()

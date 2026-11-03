@@ -18,7 +18,7 @@ full test set (1,319 prompts × 8 samples). The claims below are the IDs in
 
 | Claim | What the three seeds show | Status |
 |---|---|---|
-| M2 | From ~3 nats up, GRPO leads DPO and DPO+NLL at matched KL: 0.589 vs 0.542 / 0.538 pass@1 at ~3 nats, 0.606 vs 0.550 / 0.545 at ~5 nats; all 7 matched per-seed pairs favor GRPO by 0.02 to 0.07 | tentative: across-seed CI not yet clear of 0 on matched pairs |
+| M2 | From ~3 nats up, GRPO leads DPO and DPO+NLL at matched KL: all 7 matched per-seed pairs at ~3 and ~5 nats favor GRPO by 0.02 to 0.07, each with a paired CI excluding 0. The three-seed means (0.589 vs 0.542 / 0.538 pass@1 at ~3 nats, 0.606 vs 0.550 / 0.545 at ~5 nats) include unmatched pairs, since seed 18's DPO arms have no checkpoint near either target | tentative: no across-seed CI that is both matched and clear of 0 |
 | M3 | Pure DPO at β=0.01 collapses in every seed through likelihood displacement: pass@1 falls 0.25 below its own best, KL reaches 78 to 122 nats, held-out logp(chosen) ends 188 nats below π_SFT's | supported |
 | M4 | Adding an NLL term on the chosen answers (DPO+NLL) removes the collapse in all 12 runs, and its best checkpoint ties DPO's | supported |
 | M5 | GRPO's gain is sharpening, not new solutions: pass@1 +0.20 over π_SFT, pass@8 only +0.09, and the pass@8 − pass@1 gap shrinks from 0.38 to 0.27 | supported |
