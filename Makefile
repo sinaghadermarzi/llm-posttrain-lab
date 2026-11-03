@@ -1,4 +1,4 @@
-.PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke evidence \
+.PHONY: preflight prefetch smoke all status gpu-log reset reset-smoke evidence viewer \
 	sft-base rm arm-sft arm-dpo arm-dpo-nll arm-ppo arm-grpo eval plots helpful-probe helpful-all \
 	math-sft-base math-pairs math-arm-sft math-arm-dpo math-arm-dpo-nll math-arm-grpo math-eval math-plots math-all \
 	math-seeds
@@ -59,6 +59,11 @@ evidence:
 	@if [ -z "$(NAME)" ] || [ "$(TASK)" = "all" ]; then \
 		echo "make evidence needs TASK=math|helpful and NAME=<short-name> (e.g. NAME=seeds17-19_full-test)"; exit 2; fi
 	python analysis/export_evidence.py $(TASK) $(NAME) $(EVIDENCE_ARGS)
+
+# one self-contained HTML page per track from its latest snapshot
+# (evidence/viewer/<task>.html; analysis/build_viewer.py). Rerun after make evidence.
+viewer:
+	python analysis/build_viewer.py math helpful
 
 # ---- helpful track (UltraFeedback, learned reward) ----
 

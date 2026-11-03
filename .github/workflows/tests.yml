@@ -1,0 +1,34 @@
+name: tests
+
+# The CPU test suite (AGENTS.md "Tests"): the exact pinned package set, CPU
+# torch, no GPU. Real runs happen on the pod and are not exercised here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install the pinned test stack (CPU torch)
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install -p .venv/bin/python \
+            --index-strategy unsafe-best-match \
+            --extra-index-url https://download.pytorch.org/whl/cpu \
+            trl==1.7.0 transformers==5.13.0 datasets==5.0.0 accelerate==1.14.0 \
+            omegaconf==2.3.1 lm-eval==0.4.12 torch pandas matplotlib seaborn \
+            mlflow-skinny peft pytest
+          uv pip install -p .venv/bin/python -e . --no-deps
+
+      - name: Tests
+        run: .venv/bin/python -m pytest tests/ -q -p no:cacheprovider

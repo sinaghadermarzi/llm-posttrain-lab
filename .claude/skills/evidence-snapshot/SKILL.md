@@ -53,6 +53,7 @@ Fix the cause; don't work around it. Every `tables/compare_<i>.txt` should say `
 - Read `tables/compare_*.txt` and `examples/examples.md`.
 - Glance at the figures.
 - Check the snapshot is small (`total_bytes`) and holds no checkpoints or samples files.
+- Run `make viewer` so `evidence/viewer/<task>.html` shows this snapshot; commit it with the snapshot.
 
 ## 5. Log it, then update the findings
 

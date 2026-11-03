@@ -10,6 +10,7 @@ or blog post draws on it.
 | [`LOG.md`](LOG.md) | Lab notebook, newest first: runs, timings, incidents, decisions | hand, as things happen |
 | `<task>/<date>_<name>/` | A **snapshot**: what one results tree held at one point | `make evidence` only |
 | `<task>/snapshot.yaml` | The comparisons and example checkpoints a snapshot exports, fixed before the numbers are seen | hand, in a reviewed commit |
+| `viewer/<task>.html` | One self-contained page per track rendered from its latest snapshot: the frontier with hover, the seed-mean table, every comparison and the examples | `make viewer`, after each snapshot |
 
 ## Rules
 
@@ -50,6 +51,8 @@ The export writes `evidence/math/<date>_seeds17-19_full-test/`:
   saved since the evidence layer. `estimate: checkpoint mtimes` is for runs trained before that.
 - `configs/as_run/` exists only for runs trained since then. For older runs, `configs/` is the repo's yamls at
   export time, which may differ from what ran.
+
+Then `make viewer` rerenders `evidence/viewer/<task>.html` from the new snapshot; commit it with the snapshot.
 
 The export refuses if any output the track's plots make is missing, or older than its inputs. That's the same test
 `make status` uses: run `make math-plots` first. It also refuses if the snapshot dir already exists. It rebuilds the
