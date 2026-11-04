@@ -3,6 +3,35 @@
 Experiments demonstrating **why preference alignment in LLM post-training uses
 reinforcement learning (PPO, GRPO) rather than plain SFT or DPO.**
 
+## Findings so far (math track, 3 seeds)
+
+[![tests](https://github.com/sinaghadermarzi/llm-posttrain-lab/actions/workflows/tests.yml/badge.svg)](https://github.com/sinaghadermarzi/llm-posttrain-lab/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Qwen2.5-1.5B on GSM8K with a verifier reward, seeds 17, 18 and 19, every checkpoint scored on the
+full test set (1,319 prompts × 8 samples). The claims below are the IDs in
+[`evidence/FINDINGS.md`](evidence/FINDINGS.md); the numbers come from the snapshot
+[`evidence/math/2026-10-25_seeds17-19_dense-grpo`](evidence/math/2026-10-25_seeds17-19_dense-grpo/). Browse the same tables and example responses in
+[`evidence/viewer/math.html`](evidence/viewer/math.html) (built by `make viewer`).
+
+![accuracy vs KL from π_SFT, mean ± SE over seeds](evidence/math/2026-10-25_seeds17-19_dense-grpo/figures/frontier_math.png)
+
+| Claim | What the three seeds show | Status |
+|---|---|---|
+| M2 | From ~3 nats up, GRPO leads DPO and DPO+NLL at matched KL: all 7 matched per-seed pairs at ~3 and ~5 nats favor GRPO by 0.02 to 0.07, each with a paired CI excluding 0. The three-seed means (0.589 vs 0.542 / 0.538 pass@1 at ~3 nats, 0.606 vs 0.550 / 0.545 at ~5 nats) include unmatched pairs, since seed 18's DPO arms have no checkpoint near either target | tentative: no across-seed CI that is both matched and clear of 0 |
+| M3 | Pure DPO at β=0.01 collapses in every seed through likelihood displacement: pass@1 falls 0.25 below its own best, KL reaches 78 to 122 nats, held-out logp(chosen) ends 188 nats below π_SFT's | supported |
+| M4 | Adding an NLL term on the chosen answers (DPO+NLL) removes the collapse in all 12 runs, and its best checkpoint ties DPO's | supported |
+| M5 | GRPO's gain is sharpening, not new solutions: pass@1 +0.20 over π_SFT, pass@8 only +0.09, and the pass@8 − pass@1 gap shrinks from 0.38 to 0.27 | supported |
+| M6 | General ability is mostly kept: WikiText perplexity +0.33 for GRPO, +1.73 for collapsed DPO; HellaSwag and ARC move by about 1 SE | supported |
+| M9 | Training randomness dominates DPO but not GRPO: across seeds DPO's pass@1 varies by 7× its eval SE, GRPO's by half | tentative |
+| M10 | Continued SFT on the gold answers buys +0.03 pass@1 for ~7.6 nats, dipping below π_SFT on the way | supported |
+| M11 | Below ~3 nats the three arms are within 0.02 of each other at matched KL, and which leads depends on the seed | tentative |
+
+The helpful track (UltraFeedback, learned reward, PPO included) has not produced results yet; its
+comparisons are already fixed in [`evidence/helpful/snapshot.yaml`](evidence/helpful/snapshot.yaml).
+Conventions for reading these numbers (KL is `kl_k1`, ties are 0.02 pass@1, matched KL is 0.3 nats)
+are at the top of `FINDINGS.md`.
+
 ## Hypothesis
 
 SFT on preferred answers is imitation learning: next-token-prediction loss pulls

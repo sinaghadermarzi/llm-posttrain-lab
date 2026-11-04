@@ -288,7 +288,8 @@ def test_runs_save_their_resolved_config_and_final_state(tmp_path: Path) -> None
 
 
 def test_agent_docs_and_skills() -> None:
-    assert (ROOT / "CLAUDE.md").read_text().strip() == "@AGENTS.md"
+    # CLAUDE.md imports AGENTS.md on its first line; it may add Claude-only sections after that
+    assert (ROOT / "CLAUDE.md").read_text().strip().splitlines()[0] == "@AGENTS.md"
     agents = (ROOT / "AGENTS.md").read_text()
     assert "evidence/README.md" in agents and "make evidence" in agents and "bash` 3.2" in agents
     for skill in ("evidence-snapshot", "update-findings"):

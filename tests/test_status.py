@@ -554,3 +554,51 @@ def test_a_run_trained_under_an_older_cadence_is_flagged(repo, tmp_path: Path) -
     assert f"m3d {old.name}: finished with 5 of the 10 checkpoints" in attention
     assert 'make reset TASK=math RESET_ARGS="--stage m3d --dry-run"' in attention
     assert new.name not in attention
+
+
+def test_a_jobs_stdout_counts_as_its_log_only_if_the_file_still_exists(tmp_path: Path) -> None:
+    """On Linux, /proc/<pid>/fd/1 of a job whose stdout is a deleted temp file (pytest's capture, a
+    removed log) reads '/tmp/x (deleted)'. That used to win over the run's own sweep log, so a running
+    sweep job showed no progress in CI (test_running_job_is_detected). A tty or pipe is not a log either."""
+    import sys
+    import tempfile
+
+    from posttrain_lab.status import _proc_stdout
+
+    if not Path("/proc").is_dir():
+        pytest.skip("/proc only")
+    with tempfile.TemporaryFile() as deleted:
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdout=deleted)
+        try:
+            assert _proc_stdout(p.pid) is None
+        finally:
+            p.kill()
+            p.wait()
+    log = tmp_path / "job.log"
+    with log.open("w") as f:
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdout=f)
+        try:
+            assert _proc_stdout(p.pid) == str(log)
+        finally:
+            p.kill()
+            p.wait()
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdout=subprocess.PIPE)
+    try:
+        assert _proc_stdout(p.pid) is None
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_low_disk_is_flagged_for_real_runs_but_not_smoke() -> None:
+    """FREE_GB_WARN is sized for real results trees. A smoke run is tiny, and the machine
+    running it (a laptop, a CI runner) is often under the floor, which made
+    test_finished_smoke_run_reads_done depend on the runner's free disk."""
+    from posttrain_lab.status import FREE_GB_WARN, attention
+
+    low = {"free": (FREE_GB_WARN - 1) * 1024**3, "total": 100 * 1024**3}
+    base = {"results_dir": "/r", "tracks": [], "gpus": None, "gpu_history": None, "other_jobs": []}
+    assert any("free under /r" in a for a in attention({**base, "disk": low, "smoke": False}, []))
+    assert not any("free under" in a for a in attention({**base, "disk": low, "smoke": True}, []))
+    enough = {"free": (FREE_GB_WARN + 1) * 1024**3, "total": 100 * 1024**3}
+    assert not any("free under" in a for a in attention({**base, "disk": enough, "smoke": False}, []))

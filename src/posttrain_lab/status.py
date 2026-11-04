@@ -504,11 +504,16 @@ def in_this_repo(pid: int) -> bool:
 
 
 def _proc_stdout(pid: int) -> str | None:
+    """The file a process's stdout is redirected to, if it is a file that still
+    exists: not a tty or pipe, and not an unlinked temp file (what pytest's
+    capture, or a deleted log, leaves behind as '/tmp/x (deleted)')."""
     try:
         target = os.readlink(f"/proc/{pid}/fd/1")
     except OSError:
         return None
-    return target if target.startswith("/") and not target.startswith("/dev/") else None
+    if not target.startswith("/") or target.startswith("/dev/") or target.endswith(" (deleted)"):
+        return None
+    return target if Path(target).is_file() else None
 
 
 def list_processes() -> list[dict]:
@@ -856,7 +861,7 @@ def resolve_run(stage: Stage, cfg, override: str | None, jobs_by_dir: dict[str, 
         candidate = REPO_ROOT / log_name(stage.log, override, seed=run.seed)
         if candidate.exists():
             log_path = candidate
-    if job is not None and job.log:
+    if job is not None and job.log and Path(job.log).is_file():
         log_path = Path(job.log)
     lines: list[str] | None = None
     if log_path is not None and log_path != driver_log:
@@ -1227,7 +1232,9 @@ def collect(tasks: list[str], log_override: str | None = None, seeds: list[int] 
 def attention(report: dict, jobs: list[Job]) -> list[str]:
     items = []
     disk = report.get("disk")
-    if disk and disk["free"] < FREE_GB_WARN * 1024**3:
+    # the FREE_GB_WARN floor is sized for real runs (~310 GB for both tracks); a smoke
+    # tree is tiny, so a small-disk laptop or CI runner is not a problem to flag there
+    if disk and disk["free"] < FREE_GB_WARN * 1024**3 and not report.get("smoke"):
         items.append(f"only {fmt_bytes(disk['free'])} free under {report['results_dir']}")
     for track in report["tracks"]:
         t = track["task"]
