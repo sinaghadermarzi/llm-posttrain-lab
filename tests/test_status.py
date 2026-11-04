@@ -588,3 +588,17 @@ def test_a_jobs_stdout_counts_as_its_log_only_if_the_file_still_exists(tmp_path:
     finally:
         p.kill()
         p.wait()
+
+
+def test_low_disk_is_flagged_for_real_runs_but_not_smoke() -> None:
+    """FREE_GB_WARN is sized for real results trees. A smoke run is tiny, and the machine
+    running it (a laptop, a CI runner) is often under the floor, which made
+    test_finished_smoke_run_reads_done depend on the runner's free disk."""
+    from posttrain_lab.status import FREE_GB_WARN, attention
+
+    low = {"free": (FREE_GB_WARN - 1) * 1024**3, "total": 100 * 1024**3}
+    base = {"results_dir": "/r", "tracks": [], "gpus": None, "gpu_history": None, "other_jobs": []}
+    assert any("free under /r" in a for a in attention({**base, "disk": low, "smoke": False}, []))
+    assert not any("free under" in a for a in attention({**base, "disk": low, "smoke": True}, []))
+    enough = {"free": (FREE_GB_WARN + 1) * 1024**3, "total": 100 * 1024**3}
+    assert not any("free under" in a for a in attention({**base, "disk": enough, "smoke": False}, []))

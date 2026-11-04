@@ -1232,7 +1232,9 @@ def collect(tasks: list[str], log_override: str | None = None, seeds: list[int] 
 def attention(report: dict, jobs: list[Job]) -> list[str]:
     items = []
     disk = report.get("disk")
-    if disk and disk["free"] < FREE_GB_WARN * 1024**3:
+    # the FREE_GB_WARN floor is sized for real runs (~310 GB for both tracks); a smoke
+    # tree is tiny, so a small-disk laptop or CI runner is not a problem to flag there
+    if disk and disk["free"] < FREE_GB_WARN * 1024**3 and not report.get("smoke"):
         items.append(f"only {fmt_bytes(disk['free'])} free under {report['results_dir']}")
     for track in report["tracks"]:
         t = track["task"]
